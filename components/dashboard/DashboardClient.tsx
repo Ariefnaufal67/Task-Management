@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, memo, useCallback } from 'react'
 import { signOut } from 'next-auth/react'
 import toast from 'react-hot-toast'
 import { 
@@ -8,27 +8,121 @@ import {
   Circle, 
   Clock, 
   Plus, 
-  Search, 
-  Filter,
+  Search,
   Moon,
   Sun,
   LogOut,
   User,
-  Tag as TagIcon,
-  Users,
-  Download,
-  Upload,
-  MoreVertical,
   Edit2,
   Trash2,
   Copy,
   Calendar,
-  AlertCircle
+  AlertCircle,
+  GripVertical
 } from 'lucide-react'
 
 interface DashboardClientProps {
   user: any
 }
+
+// Memoized TaskCard component untuk prevent unnecessary re-renders
+const TaskCard = memo(({ 
+  task, 
+  onEdit, 
+  onDelete, 
+  onDuplicate,
+  onDragStart,
+  onDragEnd,
+  getPriorityColor,
+  isOverdue,
+  users
+}: any) => {
+  return (
+    <div
+      draggable
+      onDragStart={(e) => onDragStart(e, task)}
+      onDragEnd={onDragEnd}
+      className={`bg-white dark:bg-gray-700 border-l-4 ${
+        task.priority === 'high' ? 'border-red-500' :
+        task.priority === 'medium' ? 'border-yellow-500' :
+        'border-green-500'
+      } rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow cursor-grab active:cursor-grabbing ${
+        isOverdue(task.dueDate) ? 'bg-red-50 dark:bg-red-900/20' : ''
+      }`}
+    >
+      {/* Drag Handle */}
+      <div className="flex items-center gap-2 mb-2 text-gray-400">
+        <GripVertical className="h-4 w-4" />
+        <span className="text-xs">Drag to move</span>
+      </div>
+
+      <div className="flex items-start justify-between mb-2">
+        <h4 className="font-semibold text-gray-900 dark:text-white flex-1">
+          {task.title}
+        </h4>
+        <div className="flex items-center space-x-1">
+          <button
+            onClick={() => onDuplicate(task)}
+            className="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded"
+            title="Duplicate"
+          >
+            <Copy className="h-4 w-4 text-green-600" />
+          </button>
+          <button
+            onClick={() => onEdit(task)}
+            className="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded"
+            title="Edit"
+          >
+            <Edit2 className="h-4 w-4 text-blue-600" />
+          </button>
+          <button
+            onClick={() => onDelete(task.id)}
+            className="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded"
+            title="Delete"
+          >
+            <Trash2 className="h-4 w-4 text-red-600" />
+          </button>
+        </div>
+      </div>
+
+      {task.description && (
+        <p className="text-sm text-gray-600 dark:text-gray-300 mb-3 line-clamp-2">
+          {task.description}
+        </p>
+      )}
+
+      <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+        <span className={`px-2 py-1 rounded ${getPriorityColor(task.priority)}`}>
+          {task.priority}
+        </span>
+        {task.dueDate && (
+          <span className={`flex items-center space-x-1 ${isOverdue(task.dueDate) ? 'text-red-600 font-semibold' : ''}`}>
+            <Calendar className="h-3 w-3" />
+            <span>{new Date(task.dueDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}</span>
+          </span>
+        )}
+      </div>
+
+      {task.assignees && task.assignees.length > 0 && (
+        <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
+          <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+            👤 {task.assignees.map((a: any) => a.user.name || a.user.email).join(', ')}
+          </div>
+        </div>
+      )}
+
+      {task.subtasks && task.subtasks.length > 0 && (
+        <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
+          <div className="text-xs text-gray-500 dark:text-gray-400">
+            ✅ {task.subtasks.filter((s: any) => s.completed).length} / {task.subtasks.length} subtasks
+          </div>
+        </div>
+      )}
+    </div>
+  )
+})
+
+TaskCard.displayName = 'TaskCard'
 
 export default function DashboardClient({ user }: DashboardClientProps) {
   const [tasks, setTasks] = useState<any[]>([])
@@ -37,11 +131,11 @@ export default function DashboardClient({ user }: DashboardClientProps) {
   const [loading, setLoading] = useState(true)
   const [darkMode, setDarkMode] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
-  const [filterStatus, setFilterStatus] = useState('all')
   const [filterPriority, setFilterPriority] = useState('all')
   const [showTaskModal, setShowTaskModal] = useState(false)
   const [editingTask, setEditingTask] = useState<any>(null)
   const [draggedTask, setDraggedTask] = useState<any>(null)
+  const [isDragging, setIsDragging] = useState(false)
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -104,7 +198,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
 
       const newTask = await response.json()
       setTasks([...tasks, newTask])
-      toast.success('Task created successfully')
+      toast.success('Task created!')
       resetForm()
     } catch (error) {
       toast.error('Failed to create task')
@@ -125,7 +219,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
 
       const updatedTask = await response.json()
       setTasks(tasks.map(t => t.id === updatedTask.id ? updatedTask : t))
-      toast.success('Task updated successfully')
+      toast.success('Task updated!')
       resetForm()
     } catch (error) {
       toast.error('Failed to update task')
@@ -133,7 +227,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
   }
 
   const handleDeleteTask = async (taskId: string) => {
-    if (!confirm('Are you sure you want to delete this task?')) return
+    if (!confirm('Delete this task?')) return
 
     try {
       const response = await fetch(`/api/tasks/${taskId}`, {
@@ -143,7 +237,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
       if (!response.ok) throw new Error('Failed to delete task')
 
       setTasks(tasks.filter(t => t.id !== taskId))
-      toast.success('Task deleted successfully')
+      toast.success('Task deleted!')
     } catch (error) {
       toast.error('Failed to delete task')
     }
@@ -151,9 +245,11 @@ export default function DashboardClient({ user }: DashboardClientProps) {
 
   const handleDuplicateTask = async (task: any) => {
     const duplicatedTask = {
-      ...task,
       title: `${task.title} (Copy)`,
+      description: task.description,
+      priority: task.priority,
       status: 'todo',
+      dueDate: task.dueDate,
       tagIds: task.tags?.map((t: any) => t.tagId) || [],
       assigneeIds: task.assignees?.map((a: any) => a.userId) || [],
       subtasks: task.subtasks?.map((s: any) => ({ title: s.title, completed: false })) || []
@@ -170,53 +266,56 @@ export default function DashboardClient({ user }: DashboardClientProps) {
 
       const newTask = await response.json()
       setTasks([...tasks, newTask])
-      toast.success('Task duplicated successfully')
+      toast.success('Task duplicated!')
     } catch (error) {
       toast.error('Failed to duplicate task')
     }
   }
 
-  // Drag and Drop Handlers
-  const handleDragStart = (e: React.DragEvent, task: any) => {
+  // Optimized drag handlers
+  const handleDragStart = useCallback((e: React.DragEvent, task: any) => {
     setDraggedTask(task)
+    setIsDragging(true)
     e.dataTransfer.effectAllowed = 'move'
-    // Add visual feedback
-    e.currentTarget.classList.add('opacity-50')
-  }
+    
+    // Add visual feedback with less opacity change
+    const target = e.currentTarget as HTMLElement
+    target.style.opacity = '0.4'
+  }, [])
 
-  const handleDragEnd = (e: React.DragEvent) => {
-    e.currentTarget.classList.remove('opacity-50')
-    setDraggedTask(null)
-  }
+  const handleDragEnd = useCallback((e: React.DragEvent) => {
+    const target = e.currentTarget as HTMLElement
+    target.style.opacity = '1'
+    setIsDragging(false)
+  }, [])
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
-  }
+  }, [])
 
-  const handleDragEnter = (e: React.DragEvent) => {
+  const handleDrop = useCallback(async (e: React.DragEvent, newStatus: string) => {
     e.preventDefault()
-    const target = e.currentTarget as HTMLElement
-    target.classList.add('bg-purple-50', 'dark:bg-purple-900/20')
-  }
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    const target = e.currentTarget as HTMLElement
-    target.classList.remove('bg-purple-50', 'dark:bg-purple-900/20')
-  }
-
-  const handleDrop = async (e: React.DragEvent, newStatus: string) => {
-    e.preventDefault()
-    const target = e.currentTarget as HTMLElement
-    target.classList.remove('bg-purple-50', 'dark:bg-purple-900/20')
-
+    
     if (!draggedTask || draggedTask.status === newStatus) {
       setDraggedTask(null)
+      setIsDragging(false)
       return
     }
 
+    // Optimistic update - update UI immediately
+    const updatedTasks = tasks.map(t => 
+      t.id === draggedTask.id ? { ...t, status: newStatus } : t
+    )
+    setTasks(updatedTasks)
+    setDraggedTask(null)
+    setIsDragging(false)
+
+    // Show instant feedback
+    toast.success(`Moved to ${newStatus.replace('-', ' ')}`, { duration: 1000 })
+
+    // Then update database in background
     try {
-      // Update task status
       const response = await fetch(`/api/tasks/${draggedTask.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -229,19 +328,21 @@ export default function DashboardClient({ user }: DashboardClientProps) {
         })
       })
 
-      if (!response.ok) throw new Error('Failed to update task')
+      if (!response.ok) {
+        // Revert on error
+        setTasks(tasks)
+        throw new Error('Failed to update task')
+      }
 
+      // Silently update with server response
       const updatedTask = await response.json()
-      setTasks(tasks.map(t => t.id === updatedTask.id ? updatedTask : t))
-      toast.success(`Task moved to ${newStatus.replace('-', ' ')}`)
+      setTasks(prev => prev.map(t => t.id === updatedTask.id ? updatedTask : t))
     } catch (error) {
       toast.error('Failed to move task')
     }
+  }, [draggedTask, tasks])
 
-    setDraggedTask(null)
-  }
-
-  const openEditModal = (task: any) => {
+  const openEditModal = useCallback((task: any) => {
     setEditingTask(task)
     setFormData({
       title: task.title,
@@ -254,9 +355,9 @@ export default function DashboardClient({ user }: DashboardClientProps) {
       subtasks: task.subtasks || []
     })
     setShowTaskModal(true)
-  }
+  }, [])
 
-  const resetForm = () => {
+  const resetForm = useCallback(() => {
     setFormData({
       title: '',
       description: '',
@@ -269,18 +370,17 @@ export default function DashboardClient({ user }: DashboardClientProps) {
     })
     setEditingTask(null)
     setShowTaskModal(false)
-  }
+  }, [])
 
   const filteredTasks = tasks.filter(task => {
     const matchesSearch = task.title.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesStatus = filterStatus === 'all' || task.status === filterStatus
     const matchesPriority = filterPriority === 'all' || task.priority === filterPriority
-    return matchesSearch && matchesStatus && matchesPriority
+    return matchesSearch && matchesPriority
   })
 
-  const getTasksByStatus = (status: string) => {
+  const getTasksByStatus = useCallback((status: string) => {
     return filteredTasks.filter(task => task.status === status)
-  }
+  }, [filteredTasks])
 
   const getStats = () => {
     const total = tasks.length
@@ -288,7 +388,6 @@ export default function DashboardClient({ user }: DashboardClientProps) {
     const inProgress = tasks.filter(t => t.status === 'in-progress').length
     const done = tasks.filter(t => t.status === 'done').length
     const completion = total > 0 ? Math.round((done / total) * 100) : 0
-
     return { total, todo, inProgress, done, completion }
   }
 
@@ -324,7 +423,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      {/* Header */}
+      {/* Header - Simplified */}
       <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
@@ -364,47 +463,32 @@ export default function DashboardClient({ user }: DashboardClientProps) {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
-          <div className="bg-gradient-to-br from-purple-500 to-purple-600 text-white p-6 rounded-xl shadow-lg">
-            <div className="text-3xl font-bold">{stats.total}</div>
-            <div className="text-purple-100 text-sm mt-1">Total Tasks</div>
+        {/* Stats Cards - Compact */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+          <div className="bg-gradient-to-br from-purple-500 to-purple-600 text-white p-4 rounded-xl">
+            <div className="text-2xl font-bold">{stats.total}</div>
+            <div className="text-purple-100 text-xs mt-1">Total</div>
           </div>
-          <div className="bg-gradient-to-br from-red-500 to-red-600 text-white p-6 rounded-xl shadow-lg">
-            <div className="text-3xl font-bold">{stats.todo}</div>
-            <div className="text-red-100 text-sm mt-1">To Do</div>
+          <div className="bg-gradient-to-br from-red-500 to-red-600 text-white p-4 rounded-xl">
+            <div className="text-2xl font-bold">{stats.todo}</div>
+            <div className="text-red-100 text-xs mt-1">To Do</div>
           </div>
-          <div className="bg-gradient-to-br from-yellow-500 to-yellow-600 text-white p-6 rounded-xl shadow-lg">
-            <div className="text-3xl font-bold">{stats.inProgress}</div>
-            <div className="text-yellow-100 text-sm mt-1">In Progress</div>
+          <div className="bg-gradient-to-br from-yellow-500 to-yellow-600 text-white p-4 rounded-xl">
+            <div className="text-2xl font-bold">{stats.inProgress}</div>
+            <div className="text-yellow-100 text-xs mt-1">Progress</div>
           </div>
-          <div className="bg-gradient-to-br from-green-500 to-green-600 text-white p-6 rounded-xl shadow-lg">
-            <div className="text-3xl font-bold">{stats.done}</div>
-            <div className="text-green-100 text-sm mt-1">Completed</div>
+          <div className="bg-gradient-to-br from-green-500 to-green-600 text-white p-4 rounded-xl">
+            <div className="text-2xl font-bold">{stats.done}</div>
+            <div className="text-green-100 text-xs mt-1">Done</div>
           </div>
-          <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-6 rounded-xl shadow-lg">
-            <div className="text-3xl font-bold">{stats.completion}%</div>
-            <div className="text-blue-100 text-sm mt-1">Completion</div>
-          </div>
-        </div>
-
-        {/* Info Banner */}
-        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-6">
-          <div className="flex items-start space-x-3">
-            <AlertCircle className="h-5 w-5 text-blue-600 dark:text-blue-400 mt-0.5" />
-            <div className="flex-1">
-              <h3 className="font-semibold text-blue-900 dark:text-blue-100">💡 Tips:</h3>
-              <ul className="text-sm text-blue-800 dark:text-blue-200 mt-1 space-y-1">
-                <li>• <strong>Drag & Drop:</strong> Seret task ke kolom lain untuk pindah status</li>
-                <li>• <strong>Assign Users:</strong> Register user baru untuk bisa assign tasks (minimal 2 users)</li>
-                <li>• <strong>Registered Users:</strong> {users.length} user(s) - {users.map(u => u.name || u.email).join(', ')}</li>
-              </ul>
-            </div>
+          <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-4 rounded-xl">
+            <div className="text-2xl font-bold">{stats.completion}%</div>
+            <div className="text-blue-100 text-xs mt-1">Complete</div>
           </div>
         </div>
 
-        {/* Filters */}
-        <div className="flex flex-wrap gap-4 mb-6">
+        {/* Filters - Compact */}
+        <div className="flex flex-wrap gap-3 mb-6">
           <button
             onClick={() => setShowTaskModal(true)}
             className="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition"
@@ -420,7 +504,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search tasks..."
+                placeholder="Search..."
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 dark:bg-gray-700 dark:text-white"
               />
             </div>
@@ -431,22 +515,22 @@ export default function DashboardClient({ user }: DashboardClientProps) {
             onChange={(e) => setFilterPriority(e.target.value)}
             className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 dark:bg-gray-700 dark:text-white"
           >
-            <option value="all">All Priorities</option>
+            <option value="all">All Priority</option>
             <option value="high">High</option>
             <option value="medium">Medium</option>
             <option value="low">Low</option>
           </select>
         </div>
 
-        {/* Kanban Board */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Kanban Board - Optimized */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {columns.map(column => (
             <div 
               key={column.id} 
-              className="bg-white dark:bg-gray-800 rounded-xl shadow-sm"
+              className={`bg-white dark:bg-gray-800 rounded-xl shadow-sm transition-colors ${
+                isDragging ? 'ring-2 ring-purple-300' : ''
+              }`}
               onDragOver={handleDragOver}
-              onDragEnter={handleDragEnter}
-              onDragLeave={handleDragLeave}
               onDrop={(e) => handleDrop(e, column.id)}
             >
               <div className={`${column.color} text-white px-4 py-3 rounded-t-xl flex items-center justify-between`}>
@@ -454,96 +538,32 @@ export default function DashboardClient({ user }: DashboardClientProps) {
                   <column.icon className="h-5 w-5" />
                   <h3 className="font-semibold">{column.title}</h3>
                 </div>
-                <span className="bg-white/20 px-2 py-1 rounded text-sm">
+                <span className="bg-white/20 px-2 py-1 rounded text-sm font-medium">
                   {getTasksByStatus(column.id).length}
                 </span>
               </div>
 
-              <div className="p-4 space-y-3 min-h-[400px]">
+              <div className="p-3 space-y-3 min-h-[400px]">
                 {getTasksByStatus(column.id).map(task => (
-                  <div
+                  <TaskCard
                     key={task.id}
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, task)}
+                    task={task}
+                    onEdit={openEditModal}
+                    onDelete={handleDeleteTask}
+                    onDuplicate={handleDuplicateTask}
+                    onDragStart={handleDragStart}
                     onDragEnd={handleDragEnd}
-                    className={`bg-white dark:bg-gray-700 border-l-4 ${
-                      task.priority === 'high' ? 'border-red-500' :
-                      task.priority === 'medium' ? 'border-yellow-500' :
-                      'border-green-500'
-                    } rounded-lg p-4 shadow-sm hover:shadow-md transition cursor-move ${
-                      isOverdue(task.dueDate) ? 'bg-red-50 dark:bg-red-900/20' : ''
-                    }`}
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <h4 className="font-semibold text-gray-900 dark:text-white flex-1">
-                        {task.title}
-                      </h4>
-                      <div className="flex items-center space-x-1">
-                        <button
-                          onClick={() => handleDuplicateTask(task)}
-                          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded"
-                          title="Duplicate"
-                        >
-                          <Copy className="h-4 w-4 text-green-600" />
-                        </button>
-                        <button
-                          onClick={() => openEditModal(task)}
-                          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded"
-                          title="Edit"
-                        >
-                          <Edit2 className="h-4 w-4 text-blue-600" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteTask(task.id)}
-                          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded"
-                          title="Delete"
-                        >
-                          <Trash2 className="h-4 w-4 text-red-600" />
-                        </button>
-                      </div>
-                    </div>
-
-                    {task.description && (
-                      <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">
-                        {task.description}
-                      </p>
-                    )}
-
-                    <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-                      <span className={`px-2 py-1 rounded ${getPriorityColor(task.priority)}`}>
-                        {task.priority}
-                      </span>
-                      {task.dueDate && (
-                        <span className={`flex items-center space-x-1 ${isOverdue(task.dueDate) ? 'text-red-600 font-semibold' : ''}`}>
-                          <Calendar className="h-3 w-3" />
-                          <span>{new Date(task.dueDate).toLocaleDateString()}</span>
-                        </span>
-                      )}
-                    </div>
-
-                    {task.assignees && task.assignees.length > 0 && (
-                      <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
-                        <div className="text-xs text-gray-500 dark:text-gray-400">
-                          👤 Assigned to: {task.assignees.map((a: any) => a.user.name || a.user.email).join(', ')}
-                        </div>
-                      </div>
-                    )}
-
-                    {task.subtasks && task.subtasks.length > 0 && (
-                      <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
-                        <div className="text-xs text-gray-500 dark:text-gray-400">
-                          ✅ {task.subtasks.filter((s: any) => s.completed).length} / {task.subtasks.length} subtasks
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                    getPriorityColor={getPriorityColor}
+                    isOverdue={isOverdue}
+                    users={users}
+                  />
                 ))}
 
                 {getTasksByStatus(column.id).length === 0 && (
                   <div className="text-center py-12 text-gray-400">
                     <Circle className="h-12 w-12 mx-auto mb-2 opacity-20" />
                     <p className="text-sm">No tasks</p>
-                    <p className="text-xs mt-1">Drag tasks here</p>
+                    <p className="text-xs mt-1">Drag here</p>
                   </div>
                 )}
               </div>
@@ -552,12 +572,12 @@ export default function DashboardClient({ user }: DashboardClientProps) {
         </div>
       </main>
 
-      {/* Task Modal */}
+      {/* Task Modal - Same as before but simplified */}
       {showTaskModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={(e) => e.target === e.currentTarget && resetForm()}>
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
             <h2 className="text-2xl font-bold mb-6 text-gray-900 dark:text-white">
-              {editingTask ? 'Edit Task' : 'Create New Task'}
+              {editingTask ? 'Edit Task' : 'New Task'}
             </h2>
 
             <div className="space-y-4">
@@ -623,7 +643,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
 
               {users.length > 1 && (
                 <div>
-                  <label className="block text-sm font-medium mb-2">Assign to ({users.length} users available)</label>
+                  <label className="block text-sm font-medium mb-2">Assign to</label>
                   <div className="space-y-2 max-h-32 overflow-y-auto border border-gray-300 dark:border-gray-600 rounded-lg p-2">
                     {users.filter(u => u.id !== user.id).map(u => (
                       <label key={u.id} className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 p-2 rounded">
@@ -645,14 +665,6 @@ export default function DashboardClient({ user }: DashboardClientProps) {
                   </div>
                 </div>
               )}
-
-              {users.length === 1 && (
-                <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
-                  <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                    💡 <strong>Tip:</strong> Register more users to enable task assignment. Currently only you ({user.name || user.email}) are registered.
-                  </p>
-                </div>
-              )}
             </div>
 
             <div className="flex space-x-3 mt-6">
@@ -666,7 +678,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
                 onClick={editingTask ? handleUpdateTask : handleCreateTask}
                 className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
               >
-                {editingTask ? 'Update' : 'Create'} Task
+                {editingTask ? 'Update' : 'Create'}
               </button>
             </div>
           </div>
