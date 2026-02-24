@@ -5,7 +5,7 @@ import { signOut } from 'next-auth/react'
 import toast from 'react-hot-toast'
 import { 
   CheckCircle2, Circle, Clock, Plus, Search, Moon, Sun, LogOut, User,
-  Edit2, Trash2, Copy, Calendar, AlertCircle, GripVertical, Tag as TagIcon,
+  Edit2, Trash2, Copy, Calendar, AlertCircle, GripVertical,
   Users as UsersIcon, Download, Upload, Filter, X, Settings
 } from 'lucide-react'
 
@@ -124,6 +124,16 @@ export default function DashboardClient({ user }: DashboardClientProps) {
   const [tags, setTags] = useState<any[]>([])
   const [users, setUsers] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [predefinedTags] = useState([
+    { name: 'Frontend', color: '#3b82f6' },
+    { name: 'Backend', color: '#10b981' },
+    { name: 'Design', color: '#f59e0b' },
+    { name: 'Bug', color: '#ef4444' },
+    { name: 'Feature', color: '#8b5cf6' },
+    { name: 'Documentation', color: '#06b6d4' },
+    { name: 'Testing', color: '#ec4899' },
+    { name: 'Urgent', color: '#dc2626' }
+  ])
   const [darkMode, setDarkMode] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [filterPriority, setFilterPriority] = useState('all')
@@ -131,7 +141,6 @@ export default function DashboardClient({ user }: DashboardClientProps) {
   const [filterAssignee, setFilterAssignee] = useState('all')
   const [sortBy, setSortBy] = useState('createdAt')
   const [showTaskModal, setShowTaskModal] = useState(false)
-  const [showTagModal, setShowTagModal] = useState(false)
   const [showUserModal, setShowUserModal] = useState(false)
   const [editingTask, setEditingTask] = useState<any>(null)
   const [draggedTask, setDraggedTask] = useState<any>(null)
@@ -140,7 +149,6 @@ export default function DashboardClient({ user }: DashboardClientProps) {
     title: '', description: '', priority: 'medium', status: 'todo', dueDate: '',
     tagIds: [] as string[], assigneeIds: [] as string[], subtasks: [] as any[]
   })
-  const [newTag, setNewTag] = useState({ name: '', color: '#3b82f6' })
   const [newSubtask, setNewSubtask] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -155,7 +163,26 @@ export default function DashboardClient({ user }: DashboardClientProps) {
         fetch('/api/tasks'), fetch('/api/tags'), fetch('/api/users')
       ])
       setTasks(await tasksRes.json())
-      setTags(await tagsRes.json())
+      const fetchedTags = await tagsRes.json()
+      
+      // Initialize predefined tags if database is empty
+      if (fetchedTags.length === 0) {
+        const createdTags = []
+        for (const tag of predefinedTags) {
+          try {
+            const res = await fetch('/api/tags', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(tag)
+            })
+            if (res.ok) createdTags.push(await res.json())
+          } catch (e) {}
+        }
+        setTags(createdTags)
+      } else {
+        setTags(fetchedTags)
+      }
+      
       setUsers(await usersRes.json())
     } catch (error) {
       toast.error('Failed to load data')
@@ -303,35 +330,6 @@ export default function DashboardClient({ user }: DashboardClientProps) {
     }
   }, [draggedTask, tasks])
 
-  const addTag = async () => {
-    if (!newTag.name.trim()) return
-    try {
-      const res = await fetch('/api/tags', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newTag)
-      })
-      if (!res.ok) throw new Error()
-      setTags([...tags, await res.json()])
-      setNewTag({ name: '', color: '#3b82f6' })
-      toast.success('Tag added!')
-    } catch {
-      toast.error('Failed to add tag')
-    }
-  }
-
-  const deleteTag = async (id: string) => {
-    if (!confirm('Delete tag?')) return
-    try {
-      const res = await fetch(`/api/tags/${id}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error()
-      setTags(tags.filter(t => t.id !== id))
-      toast.success('Tag deleted!')
-    } catch {
-      toast.error('Failed to delete tag')
-    }
-  }
-
   const exportJSON = () => {
     const data = { tasks, tags, users, exportedAt: new Date().toISOString() }
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
@@ -470,9 +468,6 @@ export default function DashboardClient({ user }: DashboardClientProps) {
             <h1 className="text-xl font-bold">Task Management Pro</h1>
           </div>
           <div className="flex items-center gap-3">
-            <button onClick={() => setShowTagModal(true)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Manage Tags">
-              <TagIcon className="h-5 w-5" />
-            </button>
             <button onClick={exportJSON} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Export JSON">
               <Download className="h-5 w-5" />
             </button>
@@ -631,10 +626,10 @@ export default function DashboardClient({ user }: DashboardClientProps) {
                 <input type="date" value={formData.dueDate} onChange={(e) => setFormData({...formData, dueDate: e.target.value})} className="w-full px-4 py-2 border rounded-lg dark:bg-gray-700" />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-2">Tags</label>
-                <div className="flex flex-wrap gap-2">
+                <label className="block text-sm font-medium mb-2">Tags (pilih yang sesuai)</label>
+                <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto border rounded-lg p-3">
                   {tags.map(tag => (
-                    <label key={tag.id} className="flex items-center gap-2 cursor-pointer">
+                    <label key={tag.id} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 p-2 rounded transition">
                       <input
                         type="checkbox"
                         checked={formData.tagIds.includes(tag.id)}
@@ -642,11 +637,18 @@ export default function DashboardClient({ user }: DashboardClientProps) {
                           ...formData,
                           tagIds: e.target.checked ? [...formData.tagIds, tag.id] : formData.tagIds.filter(id => id !== tag.id)
                         })}
+                        className="rounded"
                       />
-                      <span className="px-2 py-1 text-xs rounded-full" style={{backgroundColor: tag.color + '20', color: tag.color}}>{tag.name}</span>
+                      <span className="flex items-center gap-2 flex-1">
+                        <span className="w-3 h-3 rounded-full" style={{backgroundColor: tag.color}}></span>
+                        <span className="text-sm">{tag.name}</span>
+                      </span>
                     </label>
                   ))}
                 </div>
+                {tags.length === 0 && (
+                  <p className="text-sm text-gray-500 mt-2">Loading tags...</p>
+                )}
               </div>
               {users.length > 1 && (
                 <div>
@@ -697,33 +699,6 @@ export default function DashboardClient({ user }: DashboardClientProps) {
         </div>
       )}
 
-      {/* Tag Modal */}
-      {showTagModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={(e) => e.target === e.currentTarget && setShowTagModal(false)}>
-          <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-md w-full p-6">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-2xl font-bold">Manage Tags</h2>
-              <button onClick={() => setShowTagModal(false)}><X className="h-6 w-6" /></button>
-            </div>
-            <div className="flex gap-2 mb-4">
-              <input type="text" value={newTag.name} onChange={(e) => setNewTag({...newTag, name: e.target.value})} className="flex-1 px-4 py-2 border rounded-lg dark:bg-gray-700" placeholder="Tag name" />
-              <input type="color" value={newTag.color} onChange={(e) => setNewTag({...newTag, color: e.target.value})} className="w-12 h-10 rounded-lg cursor-pointer" />
-              <button onClick={addTag} className="px-4 py-2 bg-purple-600 text-white rounded-lg">Add</button>
-            </div>
-            <div className="space-y-2 max-h-60 overflow-y-auto">
-              {tags.map(tag => (
-                <div key={tag.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <div className="w-6 h-6 rounded" style={{backgroundColor: tag.color}}></div>
-                    <span>{tag.name}</span>
-                  </div>
-                  <button onClick={() => deleteTag(tag.id)} className="text-red-500"><Trash2 className="h-4 w-4" /></button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
