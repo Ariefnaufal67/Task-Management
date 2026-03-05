@@ -38,7 +38,7 @@ export async function GET(
   }
 }
 
-// PUT update task
+// PUT update task (FIXED VERSION - Sequential operations)
 export async function PUT(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -50,31 +50,67 @@ export async function PUT(
     }
 
     const body = await request.json()
+    console.log('📝 Update request for task:', params.id)
+    
     const { title, description, status, priority, dueDate, tagIds, assigneeIds, subtasks } = body
 
     if (!title?.trim()) {
       return NextResponse.json({ error: 'Title is required' }, { status: 400 })
     }
 
-    // Update task
-    const task = await prisma.task.update({
+    // Step 1: Delete existing tag relations
+    await prisma.taskTag.deleteMany({
+      where: { taskId: params.id }
+    })
+    console.log('✅ Deleted old tags')
+
+    // Step 2: Delete existing assignee relations
+    await prisma.taskAssignee.deleteMany({
+      where: { taskId: params.id }
+    })
+    console.log('✅ Deleted old assignees')
+
+    // Step 3: Update task basic fields
+    await prisma.task.update({
       where: { id: params.id },
       data: {
         title: title.trim(),
         description: description?.trim() || null,
-        status,
-        priority,
+        status: status || 'todo',
+        priority: priority || 'medium',
         dueDate: dueDate ? new Date(dueDate) : null,
-        subtasks: subtasks || [],
-        tags: {
-          deleteMany: {},
-          create: tagIds?.map((tagId: string) => ({ tagId })) || []
-        },
-        assignees: {
-          deleteMany: {},
-          create: assigneeIds?.map((userId: string) => ({ userId })) || []
-        }
-      },
+        subtasks: subtasks || []
+      }
+    })
+    console.log('✅ Updated task fields')
+
+    // Step 4: Create new tag relations (if any)
+    if (tagIds && Array.isArray(tagIds) && tagIds.length > 0) {
+      await prisma.taskTag.createMany({
+        data: tagIds.map((tagId: string) => ({
+          taskId: params.id,
+          tagId: tagId
+        })),
+        skipDuplicates: true
+      })
+      console.log('✅ Created new tags:', tagIds.length)
+    }
+
+    // Step 5: Create new assignee relations (if any)
+    if (assigneeIds && Array.isArray(assigneeIds) && assigneeIds.length > 0) {
+      await prisma.taskAssignee.createMany({
+        data: assigneeIds.map((userId: string) => ({
+          taskId: params.id,
+          userId: userId
+        })),
+        skipDuplicates: true
+      })
+      console.log('✅ Created new assignees:', assigneeIds.length)
+    }
+
+    // Step 6: Fetch complete task with all relations
+    const updatedTask = await prisma.task.findUnique({
+      where: { id: params.id },
       include: {
         tags: { include: { tag: true } },
         assignees: { include: { user: true } },
@@ -82,10 +118,18 @@ export async function PUT(
       }
     })
 
-    return NextResponse.json(task)
+    console.log('✅ Task updated successfully!')
+    return NextResponse.json(updatedTask)
+    
   } catch (error) {
-    console.error('Error updating task:', error)
-    return NextResponse.json({ error: 'Failed to update task' }, { status: 500 })
+    console.error('❌ PUT Error:', error)
+    console.error('Error details:', error instanceof Error ? error.message : error)
+    
+    return NextResponse.json({ 
+      error: 'Failed to update task',
+      message: error instanceof Error ? error.message : 'Unknown error',
+      stack: process.env.NODE_ENV === 'development' ? (error instanceof Error ? error.stack : undefined) : undefined
+    }, { status: 500 })
   }
 }
 
@@ -100,7 +144,6 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Check if user owns the task or is admin
     const task = await prisma.task.findUnique({
       where: { id: params.id }
     })
@@ -114,9 +157,11 @@ export async function DELETE(
       where: { id: params.id }
     })
 
+    console.log('✅ Task deleted:', params.id)
     return NextResponse.json({ message: 'Task deleted successfully' })
+    
   } catch (error) {
-    console.error('Error deleting task:', error)
+    console.error('❌ DELETE Error:', error)
     return NextResponse.json({ error: 'Failed to delete task' }, { status: 500 })
   }
 }
