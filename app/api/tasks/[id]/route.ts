@@ -33,12 +33,12 @@ export async function GET(
 
     return NextResponse.json(task)
   } catch (error) {
-    console.error('Error fetching task:', error)
+    console.error('GET Error:', error)
     return NextResponse.json({ error: 'Failed to fetch task' }, { status: 500 })
   }
 }
 
-// PUT update task (FIXED VERSION - Sequential operations)
+// PUT update task (FINAL FIX - Proper subtasks handling)
 export async function PUT(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -58,13 +58,29 @@ export async function PUT(
       return NextResponse.json({ error: 'Title is required' }, { status: 400 })
     }
 
+    // Prepare update data - conditional subtasks
+    const updateData: any = {
+      title: title.trim(),
+      description: description?.trim() || null,
+      status: status || 'todo',
+      priority: priority || 'medium',
+      dueDate: dueDate ? new Date(dueDate) : null
+    }
+
+    // Only add subtasks if it's actually provided and not empty
+    if (subtasks !== undefined && subtasks !== null) {
+      updateData.subtasks = subtasks
+    }
+
+    console.log('Update data:', updateData)
+
     // Step 1: Delete existing tag relations
     await prisma.taskTag.deleteMany({
       where: { taskId: params.id }
     })
     console.log('✅ Deleted old tags')
 
-    // Step 2: Delete existing assignee relations
+    // Step 2: Delete existing assignee relations  
     await prisma.taskAssignee.deleteMany({
       where: { taskId: params.id }
     })
@@ -73,14 +89,7 @@ export async function PUT(
     // Step 3: Update task basic fields
     await prisma.task.update({
       where: { id: params.id },
-      data: {
-        title: title.trim(),
-        description: description?.trim() || null,
-        status: status || 'todo',
-        priority: priority || 'medium',
-        dueDate: dueDate ? new Date(dueDate) : null,
-        subtasks: subtasks || []
-      }
+      data: updateData
     })
     console.log('✅ Updated task fields')
 
@@ -108,7 +117,7 @@ export async function PUT(
       console.log('✅ Created new assignees:', assigneeIds.length)
     }
 
-    // Step 6: Fetch complete task with all relations
+    // Step 6: Fetch complete updated task with all relations
     const updatedTask = await prisma.task.findUnique({
       where: { id: params.id },
       include: {
@@ -127,8 +136,7 @@ export async function PUT(
     
     return NextResponse.json({ 
       error: 'Failed to update task',
-      message: error instanceof Error ? error.message : 'Unknown error',
-      stack: process.env.NODE_ENV === 'development' ? (error instanceof Error ? error.stack : undefined) : undefined
+      message: error instanceof Error ? error.message : 'Unknown error'
     }, { status: 500 })
   }
 }
@@ -161,7 +169,7 @@ export async function DELETE(
     return NextResponse.json({ message: 'Task deleted successfully' })
     
   } catch (error) {
-    console.error('❌ DELETE Error:', error)
+    console.error('DELETE Error:', error)
     return NextResponse.json({ error: 'Failed to delete task' }, { status: 500 })
   }
 }
