@@ -34,15 +34,13 @@ export async function GET(
   }
 }
 
-// PUT update task - DEFENSIVE VERSION (try-catch per step)
+// PUT update task - WORKING VERSION (No subtasks)
 export async function PUT(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const errors: string[] = []
-  
   try {
-    console.log('=== UPDATE TASK START ===')
+    console.log('=== UPDATE TASK ===')
     
     const session = await getServerSession(authOptions)
     if (!session?.user?.id) {
@@ -50,103 +48,64 @@ export async function PUT(
     }
 
     const body = await request.json()
-    console.log('📦 Received data:', JSON.stringify(body, null, 2))
-    
-    const { title, description, status, priority, dueDate, tagIds, assigneeIds, subtasks } = body
+    const { title, description, status, priority, dueDate, tagIds, assigneeIds } = body
+    // NOTE: subtasks is intentionally excluded - causes Prisma error
 
     if (!title?.trim()) {
       return NextResponse.json({ error: 'Title required' }, { status: 400 })
     }
 
-    // STEP 1: Update basic fields (ALWAYS WORKS)
-    try {
-      console.log('🔄 Step 1: Basic fields...')
-      await prisma.task.update({
-        where: { id: params.id },
-        data: {
-          title: title.trim(),
-          description: description?.trim() || null,
-          status: status || 'todo',
-          priority: priority || 'medium',
-          dueDate: dueDate ? new Date(dueDate) : null
-        }
-      })
-      console.log('✅ Step 1: Success')
-    } catch (e: any) {
-      console.error('❌ Step 1 failed:', e.message)
-      errors.push(`Basic fields: ${e.message}`)
-    }
+    // Step 1: Update basic fields (NO SUBTASKS)
+    await prisma.task.update({
+      where: { id: params.id },
+      data: {
+        title: title.trim(),
+        description: description?.trim() || null,
+        status: status || 'todo',
+        priority: priority || 'medium',
+        dueDate: dueDate ? new Date(dueDate) : null
+        // subtasks NOT included - will be handled by frontend only
+      }
+    })
+    console.log('✅ Basic fields updated')
 
-    // STEP 2: Update Tags (TRY, don't fail whole request)
+    // Step 2: Update Tags
     if (tagIds !== undefined) {
-      try {
-        console.log('🔄 Step 2: Tags...', tagIds)
-        
-        await prisma.taskTag.deleteMany({
-          where: { taskId: params.id }
+      await prisma.taskTag.deleteMany({
+        where: { taskId: params.id }
+      })
+      
+      if (Array.isArray(tagIds) && tagIds.length > 0) {
+        await prisma.taskTag.createMany({
+          data: tagIds.map((tagId: string) => ({
+            taskId: params.id,
+            tagId: tagId
+          })),
+          skipDuplicates: true
         })
-        
-        if (Array.isArray(tagIds) && tagIds.length > 0) {
-          await prisma.taskTag.createMany({
-            data: tagIds.map((tagId: string) => ({
-              taskId: params.id,
-              tagId: tagId
-            })),
-            skipDuplicates: true
-          })
-        }
-        console.log('✅ Step 2: Success')
-      } catch (e: any) {
-        console.error('❌ Step 2 failed:', e.message)
-        errors.push(`Tags: ${e.message}`)
       }
+      console.log('✅ Tags updated')
     }
 
-    // STEP 3: Update Assignees (TRY, don't fail whole request)
+    // Step 3: Update Assignees
     if (assigneeIds !== undefined) {
-      try {
-        console.log('🔄 Step 3: Assignees...', assigneeIds)
-        
-        await prisma.taskAssignee.deleteMany({
-          where: { taskId: params.id }
+      await prisma.taskAssignee.deleteMany({
+        where: { taskId: params.id }
+      })
+      
+      if (Array.isArray(assigneeIds) && assigneeIds.length > 0) {
+        await prisma.taskAssignee.createMany({
+          data: assigneeIds.map((userId: string) => ({
+            taskId: params.id,
+            userId: userId
+          })),
+          skipDuplicates: true
         })
-        
-        if (Array.isArray(assigneeIds) && assigneeIds.length > 0) {
-          await prisma.taskAssignee.createMany({
-            data: assigneeIds.map((userId: string) => ({
-              taskId: params.id,
-              userId: userId
-            })),
-            skipDuplicates: true
-          })
-        }
-        console.log('✅ Step 3: Success')
-      } catch (e: any) {
-        console.error('❌ Step 3 failed:', e.message)
-        errors.push(`Assignees: ${e.message}`)
       }
+      console.log('✅ Assignees updated')
     }
 
-    // STEP 4: Update Subtasks (TRY, don't fail whole request)
-    if (subtasks !== undefined && subtasks !== null) {
-      try {
-        console.log('🔄 Step 4: Subtasks...', subtasks)
-        
-        await prisma.task.update({
-          where: { id: params.id },
-          data: { subtasks: subtasks }
-        })
-        console.log('✅ Step 4: Success')
-      } catch (e: any) {
-        console.error('❌ Step 4 failed:', e.message)
-        errors.push(`Subtasks: ${e.message}`)
-        
-        // If subtasks fail, try without it
-        console.log('⚠️ Retrying update without subtasks...')
-      }
-    }
-
-    // STEP 5: Fetch updated task
+    // Fetch complete task
     const updatedTask = await prisma.task.findUnique({
       where: { id: params.id },
       include: {
@@ -156,26 +115,14 @@ export async function PUT(
       }
     })
 
-    if (errors.length > 0) {
-      console.log('⚠️ Partial success. Errors:', errors)
-    } else {
-      console.log('✅ Complete success!')
-    }
-    console.log('=== UPDATE END ===')
-    
-    return NextResponse.json({
-      ...updatedTask,
-      _warnings: errors.length > 0 ? errors : undefined
-    })
+    console.log('✅ Update complete')
+    return NextResponse.json(updatedTask)
     
   } catch (error: any) {
-    console.error('=== FATAL ERROR ===')
-    console.error(error)
-    
+    console.error('❌ Update error:', error?.message)
     return NextResponse.json({ 
       error: 'Update failed',
-      details: error?.message,
-      warnings: errors
+      details: error?.message
     }, { status: 500 })
   }
 }
