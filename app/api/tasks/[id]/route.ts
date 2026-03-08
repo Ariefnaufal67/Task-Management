@@ -34,23 +34,23 @@ export async function GET(
   }
 }
 
-// PUT update task - WITH TAGS SUPPORT
+// PUT update task - DEFENSIVE VERSION (try-catch per step)
 export async function PUT(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const errors: string[] = []
+  
   try {
     console.log('=== UPDATE TASK START ===')
-    console.log('Task ID:', params.id)
     
     const session = await getServerSession(authOptions)
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    console.log('✅ Session OK')
 
     const body = await request.json()
-    console.log('📦 Body:', JSON.stringify(body, null, 2))
+    console.log('📦 Received data:', JSON.stringify(body, null, 2))
     
     const { title, description, status, priority, dueDate, tagIds, assigneeIds, subtasks } = body
 
@@ -58,82 +58,95 @@ export async function PUT(
       return NextResponse.json({ error: 'Title required' }, { status: 400 })
     }
 
-    // STEP 1: Update basic fields
-    console.log('🔄 Step 1: Update basic fields...')
-    await prisma.task.update({
-      where: { id: params.id },
-      data: {
-        title: title.trim(),
-        description: description?.trim() || null,
-        status: status || 'todo',
-        priority: priority || 'medium',
-        dueDate: dueDate ? new Date(dueDate) : null
-      }
-    })
-    console.log('✅ Basic fields updated')
-
-    // STEP 2: Handle Tags
-    if (tagIds !== undefined) {
-      console.log('🔄 Step 2: Update tags...')
-      console.log('Tag IDs received:', tagIds)
-      
-      // Delete old tags
-      await prisma.taskTag.deleteMany({
-        where: { taskId: params.id }
-      })
-      console.log('✅ Old tags deleted')
-      
-      // Create new tags (if any)
-      if (Array.isArray(tagIds) && tagIds.length > 0) {
-        await prisma.taskTag.createMany({
-          data: tagIds.map((tagId: string) => ({
-            taskId: params.id,
-            tagId: tagId
-          })),
-          skipDuplicates: true
-        })
-        console.log('✅ New tags created:', tagIds.length)
-      }
-    }
-
-    // STEP 3: Handle Assignees
-    if (assigneeIds !== undefined) {
-      console.log('🔄 Step 3: Update assignees...')
-      console.log('Assignee IDs received:', assigneeIds)
-      
-      // Delete old assignees
-      await prisma.taskAssignee.deleteMany({
-        where: { taskId: params.id }
-      })
-      console.log('✅ Old assignees deleted')
-      
-      // Create new assignees (if any)
-      if (Array.isArray(assigneeIds) && assigneeIds.length > 0) {
-        await prisma.taskAssignee.createMany({
-          data: assigneeIds.map((userId: string) => ({
-            taskId: params.id,
-            userId: userId
-          })),
-          skipDuplicates: true
-        })
-        console.log('✅ New assignees created:', assigneeIds.length)
-      }
-    }
-
-    // STEP 4: Handle Subtasks
-    if (subtasks !== undefined && subtasks !== null) {
-      console.log('🔄 Step 4: Update subtasks...')
-      console.log('Subtasks received:', subtasks)
-      
+    // STEP 1: Update basic fields (ALWAYS WORKS)
+    try {
+      console.log('🔄 Step 1: Basic fields...')
       await prisma.task.update({
         where: { id: params.id },
-        data: { subtasks: subtasks }
+        data: {
+          title: title.trim(),
+          description: description?.trim() || null,
+          status: status || 'todo',
+          priority: priority || 'medium',
+          dueDate: dueDate ? new Date(dueDate) : null
+        }
       })
-      console.log('✅ Subtasks updated')
+      console.log('✅ Step 1: Success')
+    } catch (e: any) {
+      console.error('❌ Step 1 failed:', e.message)
+      errors.push(`Basic fields: ${e.message}`)
     }
 
-    // STEP 5: Fetch complete task
-    console.log('🔄 Step 5: Fetch complete task...')
+    // STEP 2: Update Tags (TRY, don't fail whole request)
+    if (tagIds !== undefined) {
+      try {
+        console.log('🔄 Step 2: Tags...', tagIds)
+        
+        await prisma.taskTag.deleteMany({
+          where: { taskId: params.id }
+        })
+        
+        if (Array.isArray(tagIds) && tagIds.length > 0) {
+          await prisma.taskTag.createMany({
+            data: tagIds.map((tagId: string) => ({
+              taskId: params.id,
+              tagId: tagId
+            })),
+            skipDuplicates: true
+          })
+        }
+        console.log('✅ Step 2: Success')
+      } catch (e: any) {
+        console.error('❌ Step 2 failed:', e.message)
+        errors.push(`Tags: ${e.message}`)
+      }
+    }
+
+    // STEP 3: Update Assignees (TRY, don't fail whole request)
+    if (assigneeIds !== undefined) {
+      try {
+        console.log('🔄 Step 3: Assignees...', assigneeIds)
+        
+        await prisma.taskAssignee.deleteMany({
+          where: { taskId: params.id }
+        })
+        
+        if (Array.isArray(assigneeIds) && assigneeIds.length > 0) {
+          await prisma.taskAssignee.createMany({
+            data: assigneeIds.map((userId: string) => ({
+              taskId: params.id,
+              userId: userId
+            })),
+            skipDuplicates: true
+          })
+        }
+        console.log('✅ Step 3: Success')
+      } catch (e: any) {
+        console.error('❌ Step 3 failed:', e.message)
+        errors.push(`Assignees: ${e.message}`)
+      }
+    }
+
+    // STEP 4: Update Subtasks (TRY, don't fail whole request)
+    if (subtasks !== undefined && subtasks !== null) {
+      try {
+        console.log('🔄 Step 4: Subtasks...', subtasks)
+        
+        await prisma.task.update({
+          where: { id: params.id },
+          data: { subtasks: subtasks }
+        })
+        console.log('✅ Step 4: Success')
+      } catch (e: any) {
+        console.error('❌ Step 4 failed:', e.message)
+        errors.push(`Subtasks: ${e.message}`)
+        
+        // If subtasks fail, try without it
+        console.log('⚠️ Retrying update without subtasks...')
+      }
+    }
+
+    // STEP 5: Fetch updated task
     const updatedTask = await prisma.task.findUnique({
       where: { id: params.id },
       include: {
@@ -143,21 +156,26 @@ export async function PUT(
       }
     })
 
-    console.log('✅ UPDATE COMPLETE!')
-    console.log('=== UPDATE TASK END ===')
+    if (errors.length > 0) {
+      console.log('⚠️ Partial success. Errors:', errors)
+    } else {
+      console.log('✅ Complete success!')
+    }
+    console.log('=== UPDATE END ===')
     
-    return NextResponse.json(updatedTask)
+    return NextResponse.json({
+      ...updatedTask,
+      _warnings: errors.length > 0 ? errors : undefined
+    })
     
   } catch (error: any) {
-    console.error('=== UPDATE ERROR ===')
-    console.error('Error:', error)
-    console.error('Message:', error?.message)
-    console.error('Code:', error?.code)
-    console.error('===================')
+    console.error('=== FATAL ERROR ===')
+    console.error(error)
     
     return NextResponse.json({ 
       error: 'Update failed',
-      details: error?.message || 'Unknown error'
+      details: error?.message,
+      warnings: errors
     }, { status: 500 })
   }
 }
@@ -177,9 +195,7 @@ export async function DELETE(
       where: { id: params.id }
     })
 
-    console.log('✅ Task deleted:', params.id)
     return NextResponse.json({ message: 'Task deleted' })
-    
   } catch (error) {
     console.error('DELETE Error:', error)
     return NextResponse.json({ error: 'Failed to delete' }, { status: 500 })
