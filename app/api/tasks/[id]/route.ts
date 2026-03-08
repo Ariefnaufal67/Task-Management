@@ -34,7 +34,7 @@ export async function GET(
   }
 }
 
-// PUT update task - ULTRA SIMPLE VERSION
+// PUT update task - WITH TAGS SUPPORT
 export async function PUT(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -45,25 +45,22 @@ export async function PUT(
     
     const session = await getServerSession(authOptions)
     if (!session?.user?.id) {
-      console.log('❌ No session')
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    console.log('✅ Session OK:', session.user.email)
+    console.log('✅ Session OK')
 
     const body = await request.json()
-    console.log('📦 Request body:', JSON.stringify(body, null, 2))
+    console.log('📦 Body:', JSON.stringify(body, null, 2))
     
-    const { title, description, status, priority, dueDate } = body
+    const { title, description, status, priority, dueDate, tagIds, assigneeIds, subtasks } = body
 
     if (!title?.trim()) {
-      console.log('❌ No title')
       return NextResponse.json({ error: 'Title required' }, { status: 400 })
     }
 
-    // STEP 1: Update ONLY basic fields - NO RELATIONS, NO SUBTASKS
-    console.log('🔄 Updating basic fields only...')
-    
-    const updatedTask = await prisma.task.update({
+    // STEP 1: Update basic fields
+    console.log('🔄 Step 1: Update basic fields...')
+    await prisma.task.update({
       where: { id: params.id },
       data: {
         title: title.trim(),
@@ -71,7 +68,74 @@ export async function PUT(
         status: status || 'todo',
         priority: priority || 'medium',
         dueDate: dueDate ? new Date(dueDate) : null
-      },
+      }
+    })
+    console.log('✅ Basic fields updated')
+
+    // STEP 2: Handle Tags
+    if (tagIds !== undefined) {
+      console.log('🔄 Step 2: Update tags...')
+      console.log('Tag IDs received:', tagIds)
+      
+      // Delete old tags
+      await prisma.taskTag.deleteMany({
+        where: { taskId: params.id }
+      })
+      console.log('✅ Old tags deleted')
+      
+      // Create new tags (if any)
+      if (Array.isArray(tagIds) && tagIds.length > 0) {
+        await prisma.taskTag.createMany({
+          data: tagIds.map((tagId: string) => ({
+            taskId: params.id,
+            tagId: tagId
+          })),
+          skipDuplicates: true
+        })
+        console.log('✅ New tags created:', tagIds.length)
+      }
+    }
+
+    // STEP 3: Handle Assignees
+    if (assigneeIds !== undefined) {
+      console.log('🔄 Step 3: Update assignees...')
+      console.log('Assignee IDs received:', assigneeIds)
+      
+      // Delete old assignees
+      await prisma.taskAssignee.deleteMany({
+        where: { taskId: params.id }
+      })
+      console.log('✅ Old assignees deleted')
+      
+      // Create new assignees (if any)
+      if (Array.isArray(assigneeIds) && assigneeIds.length > 0) {
+        await prisma.taskAssignee.createMany({
+          data: assigneeIds.map((userId: string) => ({
+            taskId: params.id,
+            userId: userId
+          })),
+          skipDuplicates: true
+        })
+        console.log('✅ New assignees created:', assigneeIds.length)
+      }
+    }
+
+    // STEP 4: Handle Subtasks
+    if (subtasks !== undefined && subtasks !== null) {
+      console.log('🔄 Step 4: Update subtasks...')
+      console.log('Subtasks received:', subtasks)
+      
+      await prisma.task.update({
+        where: { id: params.id },
+        data: { subtasks: subtasks }
+      })
+      console.log('✅ Subtasks updated')
+    }
+
+    // STEP 5: Fetch complete task
+    console.log('🔄 Step 5: Fetch complete task...')
+    const updatedTask = await prisma.task.findUnique({
+      where: { id: params.id },
       include: {
         tags: { include: { tag: true } },
         assignees: { include: { user: true } },
@@ -79,7 +143,7 @@ export async function PUT(
       }
     })
 
-    console.log('✅ Update successful!')
+    console.log('✅ UPDATE COMPLETE!')
     console.log('=== UPDATE TASK END ===')
     
     return NextResponse.json(updatedTask)
@@ -87,17 +151,13 @@ export async function PUT(
   } catch (error: any) {
     console.error('=== UPDATE ERROR ===')
     console.error('Error:', error)
-    console.error('Error name:', error?.name)
-    console.error('Error message:', error?.message)
-    console.error('Error code:', error?.code)
-    console.error('Error meta:', error?.meta)
+    console.error('Message:', error?.message)
+    console.error('Code:', error?.code)
     console.error('===================')
     
     return NextResponse.json({ 
       error: 'Update failed',
-      details: error?.message || 'Unknown error',
-      code: error?.code,
-      meta: error?.meta
+      details: error?.message || 'Unknown error'
     }, { status: 500 })
   }
 }
