@@ -13,10 +13,53 @@ interface DashboardClientProps {
   user: any
 }
 
+// ========================================
+// SUBTASKS LOCALSTORAGE HELPER
+// ========================================
+const SUBTASKS_KEY = 'task-subtasks-v1'
+
+const getSubtasksFromStorage = (taskId: string) => {
+  if (typeof window === 'undefined') return []
+  try {
+    const stored = localStorage.getItem(SUBTASKS_KEY)
+    if (!stored) return []
+    const allSubtasks = JSON.parse(stored)
+    return allSubtasks[taskId] || []
+  } catch {
+    return []
+  }
+}
+
+const saveSubtasksToStorage = (taskId: string, subtasks: any[]) => {
+  if (typeof window === 'undefined') return
+  try {
+    const stored = localStorage.getItem(SUBTASKS_KEY)
+    const allSubtasks = stored ? JSON.parse(stored) : {}
+    allSubtasks[taskId] = subtasks
+    localStorage.setItem(SUBTASKS_KEY, JSON.stringify(allSubtasks))
+  } catch (e) {
+    console.error('Failed to save subtasks:', e)
+  }
+}
+
+const deleteSubtasksFromStorage = (taskId: string) => {
+  if (typeof window === 'undefined') return
+  try {
+    const stored = localStorage.getItem(SUBTASKS_KEY)
+    if (!stored) return
+    const allSubtasks = JSON.parse(stored)
+    delete allSubtasks[taskId]
+    localStorage.setItem(SUBTASKS_KEY, JSON.stringify(allSubtasks))
+  } catch (e) {
+    console.error('Failed to delete subtasks:', e)
+  }
+}
+
 // Memoized TaskCard
-const TaskCard = memo(({ task, onEdit, onDelete, onDuplicate, onDragStart, onDragEnd, getPriorityColor, isOverdue, users, tags, onToggleSubtask }: any) => {
-  const completedSubtasks = task.subtasks?.filter((s: any) => s.completed).length || 0
-  const totalSubtasks = task.subtasks?.length || 0
+const TaskCard = memo(({ task, onEdit, onDelete, onDuplicate, onDragStart, onDragEnd, getPriorityColor, isOverdue, users, tags, onToggleSubtask, localSubtasks }: any) => {
+  const subtasks = localSubtasks || []
+  const completedSubtasks = subtasks.filter((s: any) => s.completed).length
+  const totalSubtasks = subtasks.length
   const progress = totalSubtasks > 0 ? Math.round((completedSubtasks / totalSubtasks) * 100) : 0
 
   return (
@@ -69,18 +112,18 @@ const TaskCard = memo(({ task, onEdit, onDelete, onDuplicate, onDragStart, onDra
         </div>
       )}
 
-      {/* Subtasks Progress */}
+      {/* Subtasks Progress (From LocalStorage) */}
       {totalSubtasks > 0 && (
         <div className="mb-3">
           <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400 mb-1">
-            <span>Subtasks</span>
+            <span>Subtasks (Local)</span>
             <span>{progress}%</span>
           </div>
           <div className="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2">
             <div className="bg-blue-600 h-2 rounded-full transition-all" style={{ width: `${progress}%` }}></div>
           </div>
           <div className="mt-2 space-y-1">
-            {task.subtasks?.slice(0, 2).map((subtask: any, idx: number) => (
+            {subtasks.slice(0, 2).map((subtask: any, idx: number) => (
               <div key={subtask.id} className="flex items-center gap-2 text-xs">
                 <input
                   type="checkbox"
@@ -98,8 +141,11 @@ const TaskCard = memo(({ task, onEdit, onDelete, onDuplicate, onDragStart, onDra
         </div>
       )}
 
-      <div className="flex items-center justify-between text-xs">
-        <span className={`px-2 py-1 rounded ${getPriorityColor(task.priority)}`}>{task.priority}</span>
+      {/* Priority & Due Date */}
+      <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+        <span className={`px-2 py-1 rounded ${getPriorityColor(task.priority)}`}>
+          {task.priority}
+        </span>
         {task.dueDate && (
           <span className={`flex items-center gap-1 ${isOverdue(task.dueDate) ? 'text-red-600 font-semibold' : 'text-gray-500'}`}>
             <Calendar className="h-3 w-3" />
@@ -108,9 +154,10 @@ const TaskCard = memo(({ task, onEdit, onDelete, onDuplicate, onDragStart, onDra
         )}
       </div>
 
+      {/* Assignees */}
       {task.assignees && task.assignees.length > 0 && (
         <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600 text-xs text-gray-500 dark:text-gray-400 truncate">
-          👤 {task.assignees.map((a: any) => a.user.name || a.user.email).join(', ')}
+          {task.assignees.map((a: any) => a.user.name || a.user.email).join(', ')}
         </div>
       )}
     </div>
@@ -121,6 +168,7 @@ TaskCard.displayName = 'TaskCard'
 
 export default function DashboardClient({ user }: DashboardClientProps) {
   const [tasks, setTasks] = useState<any[]>([])
+  const [taskSubtasks, setTaskSubtasks] = useState<Record<string, any[]>>({}) // LocalStorage state
   const [tags, setTags] = useState<any[]>([])
   const [users, setUsers] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -151,6 +199,17 @@ export default function DashboardClient({ user }: DashboardClientProps) {
   })
   const [newSubtask, setNewSubtask] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Load subtasks from localStorage on mount and when tasks change
+  useEffect(() => {
+    if (tasks.length > 0) {
+      const subtasksMap: Record<string, any[]> = {}
+      tasks.forEach(task => {
+        subtasksMap[task.id] = getSubtasksFromStorage(task.id)
+      })
+      setTaskSubtasks(subtasksMap)
+    }
+  }, [tasks])
 
   useEffect(() => { fetchData() }, [])
   useEffect(() => {
@@ -197,10 +256,21 @@ export default function DashboardClient({ user }: DashboardClientProps) {
       const res = await fetch('/api/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: JSON.stringify({
+          ...formData,
+          subtasks: undefined // Don't send subtasks to backend
+        })
       })
       if (!res.ok) throw new Error()
-      setTasks([...tasks, await res.json()])
+      const newTask = await res.json()
+      
+      // Save subtasks to localStorage
+      if (formData.subtasks.length > 0) {
+        saveSubtasksToStorage(newTask.id, formData.subtasks)
+        setTaskSubtasks(prev => ({ ...prev, [newTask.id]: formData.subtasks }))
+      }
+      
+      setTasks([...tasks, newTask])
       toast.success('Task created!')
       resetForm()
     } catch {
@@ -214,10 +284,18 @@ export default function DashboardClient({ user }: DashboardClientProps) {
       const res = await fetch(`/api/tasks/${editingTask.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: JSON.stringify({
+          ...formData,
+          subtasks: undefined // Don't send subtasks to backend
+        })
       })
       if (!res.ok) throw new Error()
       const updated = await res.json()
+      
+      // Save subtasks to localStorage
+      saveSubtasksToStorage(editingTask.id, formData.subtasks)
+      setTaskSubtasks(prev => ({ ...prev, [editingTask.id]: formData.subtasks }))
+      
       setTasks(tasks.map(t => t.id === updated.id ? updated : t))
       toast.success('Task updated!')
       resetForm()
@@ -231,6 +309,15 @@ export default function DashboardClient({ user }: DashboardClientProps) {
     try {
       const res = await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' })
       if (!res.ok) throw new Error()
+      
+      // Delete subtasks from localStorage
+      deleteSubtasksFromStorage(taskId)
+      setTaskSubtasks(prev => {
+        const newMap = { ...prev }
+        delete newMap[taskId]
+        return newMap
+      })
+      
       setTasks(tasks.filter(t => t.id !== taskId))
       toast.success('Task deleted!')
     } catch {
@@ -239,63 +326,103 @@ export default function DashboardClient({ user }: DashboardClientProps) {
   }
 
   const handleDuplicateTask = async (task: any) => {
-    const dup = {
-      title: `${task.title} (Copy)`,
-      description: task.description,
-      priority: task.priority,
-      status: 'todo',
-      dueDate: task.dueDate,
-      tagIds: task.tags?.map((t: any) => t.tagId) || [],
-      assigneeIds: task.assignees?.map((a: any) => a.userId) || [],
-      subtasks: task.subtasks?.map((s: any) => ({ title: s.title, completed: false })) || []
-    }
     try {
+      const duplicateData = {
+        title: `${task.title} (Copy)`,
+        description: task.description,
+        status: task.status,
+        priority: task.priority,
+        dueDate: task.dueDate,
+        tagIds: task.tags?.map((t: any) => t.tagId) || [],
+        assigneeIds: task.assignees?.map((a: any) => a.userId) || []
+      }
+      
       const res = await fetch('/api/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(dup)
+        body: JSON.stringify(duplicateData)
       })
       if (!res.ok) throw new Error()
-      setTasks([...tasks, await res.json()])
+      const newTask = await res.json()
+      
+      // Duplicate subtasks to localStorage
+      const originalSubtasks = taskSubtasks[task.id] || []
+      if (originalSubtasks.length > 0) {
+        const duplicatedSubtasks = originalSubtasks.map(s => ({ ...s, id: Date.now() + Math.random() }))
+        saveSubtasksToStorage(newTask.id, duplicatedSubtasks)
+        setTaskSubtasks(prev => ({ ...prev, [newTask.id]: duplicatedSubtasks }))
+      }
+      
+      setTasks([...tasks, newTask])
       toast.success('Task duplicated!')
     } catch {
       toast.error('Failed to duplicate')
     }
   }
 
-  const handleToggleSubtask = async (taskId: string, subtaskIndex: number) => {
-    const task = tasks.find(t => t.id === taskId)
-    if (!task) return
-    const newSubtasks = [...task.subtasks]
-    newSubtasks[subtaskIndex] = { ...newSubtasks[subtaskIndex], completed: !newSubtasks[subtaskIndex].completed }
+  const openEditModal = (task: any) => {
+    setEditingTask(task)
     
-    try {
-      const res = await fetch(`/api/tasks/${taskId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...task,
-          tagIds: task.tags?.map((t: any) => t.tagId) || [],
-          assigneeIds: task.assignees?.map((a: any) => a.userId) || [],
-          subtasks: newSubtasks
-        })
-      })
-      if (!res.ok) throw new Error()
-      setTasks(tasks.map(t => t.id === taskId ? { ...t, subtasks: newSubtasks } : t))
-    } catch {
-      toast.error('Failed to update subtask')
-    }
+    // Load subtasks from localStorage
+    const localSubtasks = taskSubtasks[task.id] || []
+    
+    setFormData({
+      title: task.title,
+      description: task.description || '',
+      status: task.status,
+      priority: task.priority,
+      dueDate: task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '',
+      tagIds: task.tags?.map((t: any) => t.tagId) || [],
+      assigneeIds: task.assignees?.map((a: any) => a.userId) || [],
+      subtasks: localSubtasks // Load from localStorage
+    })
+    setShowTaskModal(true)
   }
 
+  const resetForm = () => {
+    setFormData({ title: '', description: '', priority: 'medium', status: 'todo', dueDate: '', tagIds: [], assigneeIds: [], subtasks: [] })
+    setNewSubtask('')
+    setEditingTask(null)
+    setShowTaskModal(false)
+  }
+
+  const addSubtask = () => {
+    if (!newSubtask.trim()) return
+    setFormData({
+      ...formData,
+      subtasks: [...formData.subtasks, { id: Date.now().toString(), title: newSubtask, completed: false }]
+    })
+    setNewSubtask('')
+  }
+
+  const removeSubtask = (idx: number) => {
+    setFormData({ ...formData, subtasks: formData.subtasks.filter((_, i) => i !== idx) })
+  }
+
+  const handleToggleSubtask = useCallback((taskId: string, idx: number) => {
+    const currentSubtasks = taskSubtasks[taskId] || []
+    const updated = [...currentSubtasks]
+    updated[idx] = { ...updated[idx], completed: !updated[idx].completed }
+    
+    saveSubtasksToStorage(taskId, updated)
+    setTaskSubtasks(prev => ({ ...prev, [taskId]: updated }))
+  }, [taskSubtasks])
+
+  // Rest of the code continues... (drag/drop, filters, etc.)
   const handleDragStart = useCallback((e: React.DragEvent, task: any) => {
     setDraggedTask(task)
     setIsDragging(true)
-    ;(e.currentTarget as HTMLElement).style.opacity = '0.4'
+    e.dataTransfer.effectAllowed = 'move'
   }, [])
 
-  const handleDragEnd = useCallback((e: React.DragEvent) => {
-    ;(e.currentTarget as HTMLElement).style.opacity = '1'
+  const handleDragEnd = useCallback(() => {
+    setDraggedTask(null)
     setIsDragging(false)
+  }, [])
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
   }, [])
 
   const handleDrop = useCallback(async (e: React.DragEvent, newStatus: string) => {
@@ -306,131 +433,63 @@ export default function DashboardClient({ user }: DashboardClientProps) {
       return
     }
 
-    const updatedTasks = tasks.map(t => t.id === draggedTask.id ? { ...t, status: newStatus } : t)
-    setTasks(updatedTasks)
+    const optimisticUpdate = tasks.map(t => 
+      t.id === draggedTask.id ? { ...t, status: newStatus } : t
+    )
+    setTasks(optimisticUpdate)
     setDraggedTask(null)
     setIsDragging(false)
-    toast.success(`Moved to ${newStatus.replace('-', ' ')}`, { duration: 1000 })
 
     try {
-      await fetch(`/api/tasks/${draggedTask.id}`, {
+      const res = await fetch(`/api/tasks/${draggedTask.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...draggedTask,
-          status: newStatus,
-          tagIds: draggedTask.tags?.map((t: any) => t.tagId) || [],
-          assigneeIds: draggedTask.assignees?.map((a: any) => a.userId) || [],
-          subtasks: draggedTask.subtasks || []
-        })
+        body: JSON.stringify({ ...draggedTask, status: newStatus })
       })
+      if (!res.ok) throw new Error()
+      toast.success('Task moved!')
     } catch {
       setTasks(tasks)
-      toast.error('Failed to move')
+      toast.error('Failed to move task')
     }
   }, [draggedTask, tasks])
 
-  const exportJSON = () => {
-    const data = { tasks, tags, users, exportedAt: new Date().toISOString() }
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `tasks-backup-${new Date().toISOString().split('T')[0]}.json`
-    a.click()
-    toast.success('Data exported!')
-  }
-
-  const exportCSV = () => {
-    const headers = ['Title', 'Description', 'Status', 'Priority', 'Due Date', 'Tags', 'Assignees']
-    const rows = tasks.map(t => [
-      t.title, t.description || '', t.status, t.priority,
-      t.dueDate ? new Date(t.dueDate).toLocaleDateString() : '',
-      t.tags?.map((tt: any) => tags.find(tag => tag.id === tt.tagId)?.name).join(', ') || '',
-      t.assignees?.map((a: any) => a.user.name || a.user.email).join(', ') || ''
-    ])
-    const csv = [headers, ...rows].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n')
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `tasks-export-${new Date().toISOString().split('T')[0]}.csv`
-    a.click()
-    toast.success('CSV exported!')
-  }
-
-  const importData = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = (ev) => {
-      try {
-        const data = JSON.parse(ev.target?.result as string)
-        if (data.tasks) setTasks(data.tasks)
-        if (data.tags) setTags(data.tags)
-        toast.success('Data imported!')
-      } catch {
-        toast.error('Invalid file')
-      }
+  const getPriorityColor = (priority: string) => {
+    switch (priority) {
+      case 'high': return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+      case 'medium': return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
+      default: return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
     }
-    reader.readAsText(file)
   }
 
-  const openEditModal = useCallback((task: any) => {
-    setEditingTask(task)
-    setFormData({
-      title: task.title,
-      description: task.description || '',
-      priority: task.priority,
-      status: task.status,
-      dueDate: task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '',
-      tagIds: task.tags?.map((t: any) => t.tagId) || [],
-      assigneeIds: task.assignees?.map((a: any) => a.userId) || [],
-      subtasks: task.subtasks || []
-    })
-    setShowTaskModal(true)
-  }, [])
-
-  const resetForm = () => {
-    setFormData({ title: '', description: '', priority: 'medium', status: 'todo', dueDate: '', tagIds: [], assigneeIds: [], subtasks: [] })
-    setEditingTask(null)
-    setShowTaskModal(false)
+  const isOverdue = (dueDate: string | null) => {
+    if (!dueDate) return false
+    return new Date(dueDate) < new Date()
   }
 
-  const addSubtask = () => {
-    if (!newSubtask.trim()) return
-    setFormData({ ...formData, subtasks: [...formData.subtasks, { id: Date.now().toString(), title: newSubtask, completed: false }] })
-    setNewSubtask('')
-  }
+  // ... Continue with filters, export/import, and render
+  // (Keep rest of the original code)
+  
+  const filteredTasks = tasks
+    .filter(t => !searchTerm || t.title.toLowerCase().includes(searchTerm.toLowerCase()) || t.description?.toLowerCase().includes(searchTerm.toLowerCase()))
+    .filter(t => filterPriority === 'all' || t.priority === filterPriority)
+    .filter(t => filterTag === 'all' || t.tags?.some((tag: any) => tag.tagId === filterTag))
+    .filter(t => filterAssignee === 'all' || t.assignees?.some((a: any) => a.userId === filterAssignee))
 
-  const removeSubtask = (index: number) => {
-    setFormData({ ...formData, subtasks: formData.subtasks.filter((_, i) => i !== index) })
-  }
-
-  // Filtering and sorting
-  let filteredTasks = tasks.filter(t => {
-    const matchSearch = t.title.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchPriority = filterPriority === 'all' || t.priority === filterPriority
-    const matchTag = filterTag === 'all' || t.tags?.some((tt: any) => tt.tagId === filterTag)
-    const matchAssignee = filterAssignee === 'all' || t.assignees?.some((a: any) => a.userId === filterAssignee)
-    return matchSearch && matchPriority && matchTag && matchAssignee
-  })
-
-  filteredTasks = [...filteredTasks].sort((a, b) => {
-    if (sortBy === 'dueDate') {
-      if (!a.dueDate) return 1
-      if (!b.dueDate) return -1
-      return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()
-    }
+  const sortedTasks = [...filteredTasks].sort((a, b) => {
     if (sortBy === 'priority') {
-      const order: any = { high: 0, medium: 1, low: 2 }
-      return order[a.priority] - order[b.priority]
+      const priorityOrder = { high: 3, medium: 2, low: 1 }
+      return (priorityOrder[b.priority as keyof typeof priorityOrder] || 0) - (priorityOrder[a.priority as keyof typeof priorityOrder] || 0)
     }
+    if (sortBy === 'dueDate') return (a.dueDate || '9999') > (b.dueDate || '9999') ? 1 : -1
     if (sortBy === 'title') return a.title.localeCompare(b.title)
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   })
 
-  const getTasksByStatus = (status: string) => filteredTasks.filter(t => t.status === status)
+  const todoTasks = sortedTasks.filter(t => t.status === 'todo')
+  const inProgressTasks = sortedTasks.filter(t => t.status === 'in-progress')
+  const doneTasks = sortedTasks.filter(t => t.status === 'done')
+
   const stats = {
     total: tasks.length,
     todo: tasks.filter(t => t.status === 'todo').length,
@@ -439,126 +498,185 @@ export default function DashboardClient({ user }: DashboardClientProps) {
     completion: tasks.length > 0 ? Math.round((tasks.filter(t => t.status === 'done').length / tasks.length) * 100) : 0
   }
 
-  const columns = [
-    { id: 'todo', title: 'To Do', color: 'bg-red-500', icon: Circle },
-    { id: 'in-progress', title: 'In Progress', color: 'bg-yellow-500', icon: Clock },
-    { id: 'done', title: 'Done', color: 'bg-green-500', icon: CheckCircle2 }
-  ]
+  const exportData = () => {
+    const data = {
+      tasks: tasks.map(t => ({
+        ...t,
+        subtasks: taskSubtasks[t.id] || [] // Include localStorage subtasks in export
+      })),
+      tags,
+      users,
+      exportedAt: new Date().toISOString()
+    }
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `tasks-export-${new Date().toISOString().split('T')[0]}.json`
+    a.click()
+    toast.success('Data exported!')
+  }
 
-  const getPriorityColor = (p: string) => 
-    p === 'high' ? 'text-red-600 bg-red-100 dark:bg-red-900 dark:text-red-200' :
-    p === 'medium' ? 'text-yellow-600 bg-yellow-100 dark:bg-yellow-900 dark:text-yellow-200' :
-    'text-green-600 bg-green-100 dark:bg-green-900 dark:text-green-200'
+  const importData = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = async (event) => {
+      try {
+        const imported = JSON.parse(event.target?.result as string)
+        
+        // Import tasks (without subtasks to backend)
+        for (const task of imported.tasks) {
+          const { subtasks, ...taskData } = task
+          await fetch('/api/tasks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(taskData)
+          }).then(res => res.json()).then(newTask => {
+            // Save subtasks to localStorage
+            if (subtasks && subtasks.length > 0) {
+              saveSubtasksToStorage(newTask.id, subtasks)
+            }
+          })
+        }
+        
+        await fetchData()
+        toast.success('Data imported!')
+      } catch {
+        toast.error('Import failed')
+      }
+    }
+    reader.readAsText(file)
+  }
 
-  const isOverdue = (d: string) => d && new Date(d) < new Date()
-
-  if (loading) return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
-    </div>
-  )
+  if (loading) return <div className="flex items-center justify-center h-screen dark:bg-gray-900"><div className="text-xl dark:text-white">Loading...</div></div>
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors">
       {/* Header */}
-      <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <CheckCircle2 className="h-8 w-8 text-purple-600" />
-            <h1 className="text-xl font-bold">Task Management Pro</h1>
-          </div>
-          <div className="flex items-center gap-3">
-            <button onClick={exportJSON} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Export JSON">
-              <Download className="h-5 w-5" />
-            </button>
-            <button onClick={exportCSV} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Export CSV">
-              <Download className="h-5 w-5" />
-            </button>
-            <button onClick={() => fileInputRef.current?.click()} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Import">
-              <Upload className="h-5 w-5" />
-            </button>
-            <input ref={fileInputRef} type="file" accept=".json" onChange={importData} className="hidden" />
-            <button onClick={() => setDarkMode(!darkMode)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
-              {darkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-            </button>
-            <div className="flex items-center gap-2">
-              <User className="h-5 w-5 text-gray-500" />
-              <span className="text-sm">{user.name || user.email}</span>
+      <header className="bg-white dark:bg-gray-800 shadow-sm sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <CheckCircle2 className="h-8 w-8 text-purple-600" />
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Task Management Pro</h1>
             </div>
-            <button onClick={() => signOut()} className="px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg">
-              <LogOut className="h-4 w-4" />
-            </button>
+            
+            <div className="flex items-center gap-2">
+              <button onClick={exportData} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Export">
+                <Download className="h-5 w-5 text-gray-600 dark:text-gray-300" />
+              </button>
+              <button onClick={() => fileInputRef.current?.click()} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Import">
+                <Upload className="h-5 w-5 text-gray-600 dark:text-gray-300" />
+              </button>
+              <input ref={fileInputRef} type="file" accept=".json" onChange={importData} className="hidden" />
+              
+              <button onClick={() => setShowUserModal(true)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Settings">
+                <Settings className="h-5 w-5 text-gray-600 dark:text-gray-300" />
+              </button>
+              <button onClick={() => setDarkMode(!darkMode)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+                {darkMode ? <Sun className="h-5 w-5 text-yellow-500" /> : <Moon className="h-5 w-5 text-gray-600" />}
+              </button>
+              <div className="flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg">
+                <User className="h-5 w-5 text-gray-600 dark:text-gray-300" />
+                <span className="text-sm font-medium text-gray-900 dark:text-white">{user.name || user.email}</span>
+              </div>
+              <button onClick={() => signOut()} className="p-2 hover:bg-red-100 dark:hover:bg-red-900 rounded-lg text-red-600 dark:text-red-400">
+                <LogOut className="h-5 w-5" />
+              </button>
+            </div>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 py-6">
-        {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
-          {[
-            { label: 'Total', value: stats.total, color: 'from-purple-500 to-purple-600' },
-            { label: 'To Do', value: stats.todo, color: 'from-red-500 to-red-600' },
-            { label: 'Progress', value: stats.inProgress, color: 'from-yellow-500 to-yellow-600' },
-            { label: 'Done', value: stats.done, color: 'from-green-500 to-green-600' },
-            { label: 'Complete', value: `${stats.completion}%`, color: 'from-blue-500 to-blue-600' }
-          ].map((stat, i) => (
-            <div key={i} className={`bg-gradient-to-br ${stat.color} text-white p-4 rounded-xl`}>
-              <div className="text-2xl font-bold">{stat.value}</div>
-              <div className="text-xs opacity-90 mt-1">{stat.label}</div>
-            </div>
-          ))}
+      {/* Stats */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+          <div className="bg-purple-600 text-white rounded-lg p-4 shadow">
+            <div className="text-3xl font-bold">{stats.total}</div>
+            <div className="text-sm opacity-90">Total</div>
+          </div>
+          <div className="bg-red-500 text-white rounded-lg p-4 shadow">
+            <div className="text-3xl font-bold">{stats.todo}</div>
+            <div className="text-sm opacity-90">To Do</div>
+          </div>
+          <div className="bg-yellow-500 text-white rounded-lg p-4 shadow">
+            <div className="text-3xl font-bold">{stats.inProgress}</div>
+            <div className="text-sm opacity-90">In Progress</div>
+          </div>
+          <div className="bg-green-600 text-white rounded-lg p-4 shadow">
+            <div className="text-3xl font-bold">{stats.done}</div>
+            <div className="text-sm opacity-90">Done</div>
+          </div>
+          <div className="bg-blue-600 text-white rounded-lg p-4 shadow">
+            <div className="text-3xl font-bold">{stats.completion}%</div>
+            <div className="text-sm opacity-90">Complete</div>
+          </div>
         </div>
+      </div>
 
-        {/* Filters */}
-        <div className="flex flex-wrap gap-3 mb-6">
-          <button onClick={() => setShowTaskModal(true)} className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center gap-2">
-            <Plus className="h-5 w-5" /> New Task
+      {/* Controls */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-6">
+        <div className="flex flex-col sm:flex-row gap-4">
+          <button onClick={() => { resetForm(); setShowTaskModal(true) }} className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center justify-center gap-2">
+            <Plus className="h-5 w-5" />
+            New Task
           </button>
-          <div className="flex-1 min-w-[200px] relative">
+          
+          <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
             <input
               type="text"
+              placeholder="Search..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search..."
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 dark:bg-gray-700 dark:text-white"
+              className="w-full pl-10 pr-4 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
             />
           </div>
-          <select value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)} className="px-4 py-2 border rounded-lg dark:bg-gray-700">
-            <option value="all">All Priority</option>
+          
+          <select value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)} className="px-4 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+            <option value="all">All Priorities</option>
             <option value="high">High</option>
             <option value="medium">Medium</option>
             <option value="low">Low</option>
           </select>
-          <select value={filterTag} onChange={(e) => setFilterTag(e.target.value)} className="px-4 py-2 border rounded-lg dark:bg-gray-700">
+          
+          <select value={filterTag} onChange={(e) => setFilterTag(e.target.value)} className="px-4 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
             <option value="all">All Tags</option>
-            {tags.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            {tags.map(tag => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
           </select>
-          <select value={filterAssignee} onChange={(e) => setFilterAssignee(e.target.value)} className="px-4 py-2 border rounded-lg dark:bg-gray-700">
+          
+          <select value={filterAssignee} onChange={(e) => setFilterAssignee(e.target.value)} className="px-4 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
             <option value="all">All Users</option>
             {users.map(u => <option key={u.id} value={u.id}>{u.name || u.email}</option>)}
           </select>
-          <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="px-4 py-2 border rounded-lg dark:bg-gray-700">
+          
+          <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="px-4 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
             <option value="createdAt">Newest</option>
-            <option value="dueDate">Due Date</option>
             <option value="priority">Priority</option>
             <option value="title">Title</option>
+            <option value="dueDate">Due Date</option>
           </select>
         </div>
+      </div>
 
-        {/* Kanban */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {columns.map(col => (
-            <div key={col.id} className="bg-white dark:bg-gray-800 rounded-xl shadow-sm" onDragOver={(e) => e.preventDefault()} onDrop={(e) => handleDrop(e, col.id)}>
-              <div className={`${col.color} text-white px-4 py-3 rounded-t-xl flex items-center justify-between`}>
-                <div className="flex items-center gap-2">
-                  <col.icon className="h-5 w-5" />
-                  <h3 className="font-semibold">{col.title}</h3>
-                </div>
-                <span className="bg-white/20 px-2 py-1 rounded text-sm">{getTasksByStatus(col.id).length}</span>
+      {/* Kanban Board */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* To Do Column */}
+          <div onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, 'todo')} className="bg-white dark:bg-gray-800 rounded-lg shadow">
+            <div className="flex items-center justify-between px-4 py-3 border-b dark:border-gray-700">
+              <div className="flex items-center gap-2">
+                <Circle className="h-5 w-5 text-red-500" />
+                <h3 className="font-semibold text-gray-900 dark:text-white">To Do</h3>
               </div>
-              <div className="p-3 space-y-3 min-h-[400px]">
-                {getTasksByStatus(col.id).map(task => (
+              <span className="px-2 py-1 text-xs font-medium bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded">{todoTasks.length}</span>
+            </div>
+            <div className="p-4 space-y-3 min-h-[200px]">
+              {todoTasks.length === 0 ? (
+                <div className="text-center py-8 text-gray-400">No tasks</div>
+              ) : (
+                todoTasks.map(task => (
                   <TaskCard
                     key={task.id}
                     task={task}
@@ -572,133 +690,273 @@ export default function DashboardClient({ user }: DashboardClientProps) {
                     users={users}
                     tags={tags}
                     onToggleSubtask={handleToggleSubtask}
+                    localSubtasks={taskSubtasks[task.id]}
                   />
-                ))}
-                {getTasksByStatus(col.id).length === 0 && (
-                  <div className="text-center py-12 text-gray-400">
-                    <Circle className="h-12 w-12 mx-auto mb-2 opacity-20" />
-                    <p className="text-sm">No tasks</p>
-                  </div>
-                )}
-              </div>
+                ))
+              )}
             </div>
-          ))}
+          </div>
+
+          {/* In Progress Column */}
+          <div onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, 'in-progress')} className="bg-white dark:bg-gray-800 rounded-lg shadow">
+            <div className="flex items-center justify-between px-4 py-3 border-b dark:border-gray-700">
+              <div className="flex items-center gap-2">
+                <Clock className="h-5 w-5 text-yellow-500" />
+                <h3 className="font-semibold text-gray-900 dark:text-white">In Progress</h3>
+              </div>
+              <span className="px-2 py-1 text-xs font-medium bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded">{inProgressTasks.length}</span>
+            </div>
+            <div className="p-4 space-y-3 min-h-[200px]">
+              {inProgressTasks.length === 0 ? (
+                <div className="text-center py-8 text-gray-400">No tasks</div>
+              ) : (
+                inProgressTasks.map(task => (
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    onEdit={openEditModal}
+                    onDelete={handleDeleteTask}
+                    onDuplicate={handleDuplicateTask}
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
+                    getPriorityColor={getPriorityColor}
+                    isOverdue={isOverdue}
+                    users={users}
+                    tags={tags}
+                    onToggleSubtask={handleToggleSubtask}
+                    localSubtasks={taskSubtasks[task.id]}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Done Column */}
+          <div onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, 'done')} className="bg-white dark:bg-gray-800 rounded-lg shadow">
+            <div className="flex items-center justify-between px-4 py-3 border-b dark:border-gray-700">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-5 w-5 text-green-500" />
+                <h3 className="font-semibold text-gray-900 dark:text-white">Done</h3>
+              </div>
+              <span className="px-2 py-1 text-xs font-medium bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 rounded">{doneTasks.length}</span>
+            </div>
+            <div className="p-4 space-y-3 min-h-[200px]">
+              {doneTasks.length === 0 ? (
+                <div className="text-center py-8 text-gray-400">No tasks</div>
+              ) : (
+                doneTasks.map(task => (
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    onEdit={openEditModal}
+                    onDelete={handleDeleteTask}
+                    onDuplicate={handleDuplicateTask}
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
+                    getPriorityColor={getPriorityColor}
+                    isOverdue={isOverdue}
+                    users={users}
+                    tags={tags}
+                    onToggleSubtask={handleToggleSubtask}
+                    localSubtasks={taskSubtasks[task.id]}
+                  />
+                ))
+              )}
+            </div>
+          </div>
         </div>
-      </main>
+      </div>
 
       {/* Task Modal */}
       {showTaskModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={(e) => e.target === e.currentTarget && resetForm()}>
-          <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold">{editingTask ? 'Edit Task' : 'New Task'}</h2>
-              <button onClick={resetForm}><X className="h-6 w-6" /></button>
-            </div>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">Title *</label>
-                <input type="text" value={formData.title} onChange={(e) => setFormData({...formData, title: e.target.value})} className="w-full px-4 py-2 border rounded-lg dark:bg-gray-700" />
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white">{editingTask ? 'Edit Task' : 'Create Task'}</h2>
+                <button onClick={resetForm} className="text-gray-400 hover:text-gray-600">
+                  <X className="h-6 w-6" />
+                </button>
               </div>
+
               <div>
-                <label className="block text-sm font-medium mb-2">Description</label>
-                <textarea value={formData.description} onChange={(e) => setFormData({...formData, description: e.target.value})} className="w-full px-4 py-2 border rounded-lg dark:bg-gray-700" rows={3} />
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Title *</label>
+                <input
+                  type="text"
+                  value={formData.title}
+                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                  className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  placeholder="Task title"
+                />
               </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
+                <textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  rows={3}
+                  placeholder="Task description"
+                />
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium mb-2">Priority</label>
-                  <select value={formData.priority} onChange={(e) => setFormData({...formData, priority: e.target.value})} className="w-full px-4 py-2 border rounded-lg dark:bg-gray-700">
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Priority</label>
+                  <select
+                    value={formData.priority}
+                    onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
+                    className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  >
                     <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
                   </select>
                 </div>
+                
                 <div>
-                  <label className="block text-sm font-medium mb-2">Status</label>
-                  <select value={formData.status} onChange={(e) => setFormData({...formData, status: e.target.value})} className="w-full px-4 py-2 border rounded-lg dark:bg-gray-700">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Status</label>
+                  <select
+                    value={formData.status}
+                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                    className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  >
                     <option value="todo">To Do</option>
                     <option value="in-progress">In Progress</option>
                     <option value="done">Done</option>
                   </select>
                 </div>
               </div>
+
               <div>
-                <label className="block text-sm font-medium mb-2">Due Date</label>
-                <input type="date" value={formData.dueDate} onChange={(e) => setFormData({...formData, dueDate: e.target.value})} className="w-full px-4 py-2 border rounded-lg dark:bg-gray-700" />
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Due Date</label>
+                <input
+                  type="date"
+                  value={formData.dueDate}
+                  onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
+                  className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                />
               </div>
+
               <div>
-                <label className="block text-sm font-medium mb-2">Tags (pilih yang sesuai)</label>
-                <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto border rounded-lg p-3">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Tags (pilih yang sesuai)</label>
+                <div className="grid grid-cols-2 gap-2">
                   {tags.map(tag => (
-                    <label key={tag.id} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 p-2 rounded transition">
+                    <label key={tag.id} className="flex items-center gap-2 p-2 border dark:border-gray-600 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700">
                       <input
                         type="checkbox"
                         checked={formData.tagIds.includes(tag.id)}
-                        onChange={(e) => setFormData({
-                          ...formData,
-                          tagIds: e.target.checked ? [...formData.tagIds, tag.id] : formData.tagIds.filter(id => id !== tag.id)
-                        })}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setFormData({ ...formData, tagIds: [...formData.tagIds, tag.id] })
+                          } else {
+                            setFormData({ ...formData, tagIds: formData.tagIds.filter(id => id !== tag.id) })
+                          }
+                        }}
                         className="rounded"
                       />
-                      <span className="flex items-center gap-2 flex-1">
-                        <span className="w-3 h-3 rounded-full" style={{backgroundColor: tag.color}}></span>
-                        <span className="text-sm">{tag.name}</span>
-                      </span>
+                      <span className="w-3 h-3 rounded-full" style={{ backgroundColor: tag.color }}></span>
+                      <span className="text-sm text-gray-900 dark:text-white">{tag.name}</span>
                     </label>
                   ))}
                 </div>
-                {tags.length === 0 && (
-                  <p className="text-sm text-gray-500 mt-2">Loading tags...</p>
-                )}
               </div>
-              {users.length > 1 && (
-                <div>
-                  <label className="block text-sm font-medium mb-2">Assign to</label>
-                  <div className="space-y-2 max-h-32 overflow-y-auto border rounded-lg p-2">
-                    {users.filter(u => u.id !== user.id).map(u => (
-                      <label key={u.id} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 p-2 rounded">
-                        <input
-                          type="checkbox"
-                          checked={formData.assigneeIds.includes(u.id)}
-                          onChange={(e) => setFormData({
-                            ...formData,
-                            assigneeIds: e.target.checked ? [...formData.assigneeIds, u.id] : formData.assigneeIds.filter(id => id !== u.id)
-                          })}
-                        />
-                        <span className="text-sm">{u.name || u.email}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
+
               <div>
-                <div className="flex justify-between items-center mb-2">
-                  <label className="text-sm font-medium">Subtasks</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Assign to</label>
+                <div className="space-y-2">
+                  {users.map(u => (
+                    <label key={u.id} className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={formData.assigneeIds.includes(u.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setFormData({ ...formData, assigneeIds: [...formData.assigneeIds, u.id] })
+                          } else {
+                            setFormData({ ...formData, assigneeIds: formData.assigneeIds.filter(id => id !== u.id) })
+                          }
+                        }}
+                        className="rounded"
+                      />
+                      <span className="text-sm text-gray-900 dark:text-white">{u.name || u.email}</span>
+                    </label>
+                  ))}
                 </div>
-                <div className="flex gap-2 mb-3">
-                  <input type="text" value={newSubtask} onChange={(e) => setNewSubtask(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && addSubtask()} className="flex-1 px-3 py-2 border rounded-lg text-sm dark:bg-gray-700" placeholder="Add subtask" />
-                  <button onClick={addSubtask} className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm">Add</button>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Subtasks <span className="text-xs text-purple-600">(Saved locally - private to you)</span>
+                </label>
+                <div className="flex gap-2 mb-2">
+                  <input
+                    type="text"
+                    value={newSubtask}
+                    onChange={(e) => setNewSubtask(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && addSubtask()}
+                    className="flex-1 px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    placeholder="Add subtask"
+                  />
+                  <button onClick={addSubtask} className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
+                    Add
+                  </button>
                 </div>
                 <div className="space-y-2">
                   {formData.subtasks.map((sub, idx) => (
-                    <div key={idx} className="flex items-center gap-2 p-2 bg-gray-50 dark:bg-gray-700 rounded">
+                    <div key={sub.id} className="flex items-center gap-2 p-2 bg-gray-50 dark:bg-gray-700 rounded">
                       <GripVertical className="h-4 w-4 text-gray-400" />
-                      <span className="flex-1 text-sm">{sub.title}</span>
-                      <button onClick={() => removeSubtask(idx)} className="text-red-500"><X className="h-4 w-4" /></button>
+                      <span className="flex-1 text-sm text-gray-900 dark:text-white">{sub.title}</span>
+                      <button onClick={() => removeSubtask(idx)} className="text-red-500 hover:text-red-700 h-4 w-4">
+                        <X className="h-4 w-4" />
+                      </button>
                     </div>
                   ))}
                 </div>
               </div>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button onClick={resetForm} className="flex-1 px-4 py-2 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
-              <button onClick={editingTask ? handleUpdateTask : handleCreateTask} className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
-                {editingTask ? 'Update' : 'Create'}
-              </button>
+
+              <div className="flex gap-3 mt-6">
+                <button onClick={resetForm} className="flex-1 px-4 py-2 border dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-900 dark:text-white">
+                  Cancel
+                </button>
+                <button onClick={editingTask ? handleUpdateTask : handleCreateTask} className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
+                  {editingTask ? 'Update' : 'Create'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
+      {/* Settings Modal */}
+      {showUserModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-md w-full p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white">Settings</h2>
+              <button onClick={() => setShowUserModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="h-6 w-6" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Logged in as:</div>
+                <div className="font-medium text-gray-900 dark:text-white">{user.name || user.email}</div>
+              </div>
+              <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
+                <div className="text-sm font-medium text-purple-900 dark:text-purple-200 mb-1">💡 Subtasks Info</div>
+                <div className="text-xs text-purple-700 dark:text-purple-300">
+                  Subtasks are saved locally in your browser only. They are private to you and will not be visible to other users.
+                </div>
+              </div>
+              <button onClick={() => signOut()} className="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
