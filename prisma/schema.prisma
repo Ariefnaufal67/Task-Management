@@ -7,8 +7,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url = env("POSTGRES_PRISMA_URL") // uses connection pooling
-  directUrl = env("POSTGRES_URL_NON_POOLING") // uses a direct connection
+  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -20,12 +19,12 @@ model User {
   password      String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
-
-  accounts      Account[]
-  sessions      Session[]
+  
   tasks         Task[]
   assignedTasks TaskAssignee[]
   comments      Comment[]
+  accounts      Account[]
+  sessions      Session[]
 }
 
 model Account {
@@ -34,12 +33,12 @@ model Account {
   type              String
   provider          String
   providerAccountId String
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
+  refresh_token     String?
+  access_token      String?
   expires_at        Int?
   token_type        String?
   scope             String?
-  id_token          String? @db.Text
+  id_token          String?
   session_state     String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -55,44 +54,30 @@ model Session {
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
-model VerificationToken {
-  identifier String
-  token      String   @unique
-  expires    DateTime
-
-  @@unique([identifier, token])
-}
-
 model Task {
   id          String   @id @default(cuid())
   title       String
-  description String?  @db.Text
-  status      String   @default("todo") // todo, in-progress, done
-  priority    String   @default("medium") // low, medium, high
+  description String?
+  status      String   @default("todo")
+  priority    String   @default("medium")
   dueDate     DateTime?
+  finalReport String?  @db.Text  // NEW FIELD: Laporan Akhir
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  
   userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   
-  tags        TaskTag[]
-  assignees   TaskAssignee[]
-  subtasks    Subtask[]
-  comments    Comment[]
-  attachments Attachment[]
-
-  @@index([userId])
-  @@index([status])
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tags      TaskTag[]
+  assignees TaskAssignee[]
+  comments  Comment[]
 }
 
 model Tag {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  color     String
-  createdAt DateTime @default(now())
+  id    String @id @default(cuid())
+  name  String @unique
+  color String
   
-  tasks     TaskTag[]
+  tasks TaskTag[]
 }
 
 model TaskTag {
@@ -117,45 +102,14 @@ model TaskAssignee {
   @@unique([taskId, userId])
 }
 
-model Subtask {
-  id        String   @id @default(cuid())
-  title     String
-  completed Boolean  @default(false)
-  order     Int      @default(0)
-  createdAt DateTime @default(now())
-  
-  taskId    String
-  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  
-  @@index([taskId])
-}
-
 model Comment {
   id        String   @id @default(cuid())
-  content   String   @db.Text
+  content   String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
   taskId    String
-  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   
-  @@index([taskId])
-  @@index([userId])
-}
-
-model Attachment {
-  id        String   @id @default(cuid())
-  filename  String
-  url       String
-  size      Int
-  type      String
-  createdAt DateTime @default(now())
-  
-  taskId    String
-  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  
-  @@index([taskId])
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

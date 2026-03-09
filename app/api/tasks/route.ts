@@ -4,77 +4,20 @@ import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
 // GET all tasks
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     const session = await getServerSession(authOptions)
-    
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const tasks = await prisma.task.findMany({
-      where: {
-        OR: [
-          { userId: session.user.id },
-          {
-            assignees: {
-              some: {
-                userId: session.user.id
-              }
-            }
-          }
-        ]
-      },
       include: {
-        tags: {
-          include: {
-            tag: true
-          }
-        },
-        assignees: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-                image: true
-              }
-            }
-          }
-        },
-        subtasks: {
-          orderBy: {
-            order: 'asc'
-          }
-        },
-        comments: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                image: true
-              }
-            }
-          },
-          orderBy: {
-            createdAt: 'desc'
-          }
-        },
-        attachments: true,
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            image: true
-          }
-        }
+        tags: { include: { tag: true } },
+        assignees: { include: { user: true } },
+        user: true
       },
-      orderBy: {
-        createdAt: 'desc'
-      }
+      orderBy: { createdAt: 'desc' }
     })
 
     return NextResponse.json(tasks)
@@ -88,71 +31,38 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
-    
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const body = await request.json()
-    const { title, description, priority, status, dueDate, tagIds, assigneeIds, subtasks } = body
+    const { title, description, status, priority, dueDate, finalReport, tagIds, assigneeIds } = body
 
-    if (!title) {
+    if (!title?.trim()) {
       return NextResponse.json({ error: 'Title is required' }, { status: 400 })
     }
 
+    // Create task with finalReport field
     const task = await prisma.task.create({
       data: {
-        title,
-        description,
-        priority: priority || 'medium',
+        title: title.trim(),
+        description: description?.trim() || null,
         status: status || 'todo',
+        priority: priority || 'medium',
         dueDate: dueDate ? new Date(dueDate) : null,
+        finalReport: finalReport?.trim() || null,  // NEW: Laporan Akhir
         userId: session.user.id,
-        tags: tagIds ? {
-          create: tagIds.map((tagId: string) => ({
-            tag: { connect: { id: tagId } }
-          }))
-        } : undefined,
-        assignees: assigneeIds ? {
-          create: assigneeIds.map((userId: string) => ({
-            user: { connect: { id: userId } }
-          }))
-        } : undefined,
-        subtasks: subtasks ? {
-          create: subtasks.map((subtask: any, index: number) => ({
-            title: subtask.title,
-            completed: subtask.completed || false,
-            order: index
-          }))
-        } : undefined
-      },
-      include: {
         tags: {
-          include: {
-            tag: true
-          }
+          create: tagIds?.map((tagId: string) => ({ tagId })) || []
         },
         assignees: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-                image: true
-              }
-            }
-          }
-        },
-        subtasks: true,
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            image: true
-          }
+          create: assigneeIds?.map((userId: string) => ({ userId })) || []
         }
+      },
+      include: {
+        tags: { include: { tag: true } },
+        assignees: { include: { user: true } },
+        user: true
       }
     })
 
