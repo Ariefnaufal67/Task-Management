@@ -6,7 +6,7 @@ import toast from 'react-hot-toast'
 import { 
   CheckCircle2, Circle, Clock, Plus, Search, Moon, Sun, LogOut, User,
   Edit2, Trash2, Copy, Calendar, AlertCircle, GripVertical,
-  Users as UsersIcon, Download, Upload, Filter, X, Settings
+  Users as UsersIcon, Download, Upload, Filter, X, Settings, FileText
 } from 'lucide-react'
 
 interface DashboardClientProps {
@@ -195,9 +195,8 @@ export default function DashboardClient({ user }: DashboardClientProps) {
   const [isDragging, setIsDragging] = useState(false)
   const [formData, setFormData] = useState({
     title: '', description: '', priority: 'medium', status: 'todo', dueDate: '',
-    tagIds: [] as string[], assigneeIds: [] as string[], subtasks: [] as any[]
+    tagIds: [] as string[], assigneeIds: [] as string[], finalReport: ''
   })
-  const [newSubtask, setNewSubtask] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Load subtasks from localStorage on mount and when tasks change
@@ -380,8 +379,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
   }
 
   const resetForm = () => {
-    setFormData({ title: '', description: '', priority: 'medium', status: 'todo', dueDate: '', tagIds: [], assigneeIds: [], subtasks: [] })
-    setNewSubtask('')
+    setFormData({ title: '', description: '', priority: 'medium', status: 'todo', dueDate: '', tagIds: [], assigneeIds: [], finalReport: '' })
     setEditingTask(null)
     setShowTaskModal(false)
   }
@@ -392,7 +390,6 @@ export default function DashboardClient({ user }: DashboardClientProps) {
       ...formData,
       subtasks: [...formData.subtasks, { id: Date.now().toString(), title: newSubtask, completed: false }]
     })
-    setNewSubtask('')
   }
 
   const removeSubtask = (idx: number) => {
