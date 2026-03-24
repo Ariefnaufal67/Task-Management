@@ -13,55 +13,7 @@ interface DashboardClientProps {
   user: any
 }
 
-// ========================================
-// SUBTASKS LOCALSTORAGE HELPER
-// ========================================
-const SUBTASKS_KEY = 'task-subtasks-v1'
-
-const getSubtasksFromStorage = (taskId: string) => {
-  if (typeof window === 'undefined') return []
-  try {
-    const stored = localStorage.getItem(SUBTASKS_KEY)
-    if (!stored) return []
-    const allSubtasks = JSON.parse(stored)
-    return allSubtasks[taskId] || []
-  } catch {
-    return []
-  }
-}
-
-const saveSubtasksToStorage = (taskId: string, subtasks: any[]) => {
-  if (typeof window === 'undefined') return
-  try {
-    const stored = localStorage.getItem(SUBTASKS_KEY)
-    const allSubtasks = stored ? JSON.parse(stored) : {}
-    allSubtasks[taskId] = subtasks
-    localStorage.setItem(SUBTASKS_KEY, JSON.stringify(allSubtasks))
-  } catch (e) {
-    console.error('Failed to save subtasks:', e)
-  }
-}
-
-const deleteSubtasksFromStorage = (taskId: string) => {
-  if (typeof window === 'undefined') return
-  try {
-    const stored = localStorage.getItem(SUBTASKS_KEY)
-    if (!stored) return
-    const allSubtasks = JSON.parse(stored)
-    delete allSubtasks[taskId]
-    localStorage.setItem(SUBTASKS_KEY, JSON.stringify(allSubtasks))
-  } catch (e) {
-    console.error('Failed to delete subtasks:', e)
-  }
-}
-
-// Memoized TaskCard
-const TaskCard = memo(({ task, onEdit, onDelete, onDuplicate, onDragStart, onDragEnd, getPriorityColor, isOverdue, users, tags, onToggleSubtask, localSubtasks }: any) => {
-  const subtasks = localSubtasks || []
-  const completedSubtasks = subtasks.filter((s: any) => s.completed).length
-  const totalSubtasks = subtasks.length
-  const progress = totalSubtasks > 0 ? Math.round((completedSubtasks / totalSubtasks) * 100) : 0
-
+const TaskCard = memo(({ task, onEdit, onDelete, onDuplicate, onDragStart, onDragEnd, getPriorityColor, isOverdue, users, tags }: any) => {
   return (
     <div
       draggable
@@ -112,32 +64,14 @@ const TaskCard = memo(({ task, onEdit, onDelete, onDuplicate, onDragStart, onDra
         </div>
       )}
 
-      {/* Subtasks Progress (From LocalStorage) */}
-      {totalSubtasks > 0 && (
-        <div className="mb-3">
-          <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400 mb-1">
-            <span>Subtasks (Local)</span>
-            <span>{progress}%</span>
+      {/* Final Report Preview */}
+      {task.finalReport && (
+        <div className="mb-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+          <div className="flex items-center gap-2 mb-1">
+            <FileText className="h-4 w-4 text-blue-600" />
+            <span className="text-xs font-medium text-blue-900 dark:text-blue-200">Laporan Akhir</span>
           </div>
-          <div className="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2">
-            <div className="bg-blue-600 h-2 rounded-full transition-all" style={{ width: `${progress}%` }}></div>
-          </div>
-          <div className="mt-2 space-y-1">
-            {subtasks.slice(0, 2).map((subtask: any, idx: number) => (
-              <div key={subtask.id} className="flex items-center gap-2 text-xs">
-                <input
-                  type="checkbox"
-                  checked={subtask.completed}
-                  onChange={() => onToggleSubtask(task.id, idx)}
-                  className="rounded"
-                />
-                <span className={subtask.completed ? 'line-through text-gray-400' : 'text-gray-600 dark:text-gray-300'}>
-                  {subtask.title}
-                </span>
-              </div>
-            ))}
-            {totalSubtasks > 2 && <div className="text-xs text-gray-400">+{totalSubtasks - 2} more</div>}
-          </div>
+          <p className="text-sm text-gray-700 dark:text-gray-300 line-clamp-2">{task.finalReport}</p>
         </div>
       )}
 
@@ -168,7 +102,6 @@ TaskCard.displayName = 'TaskCard'
 
 export default function DashboardClient({ user }: DashboardClientProps) {
   const [tasks, setTasks] = useState<any[]>([])
-  const [taskSubtasks, setTaskSubtasks] = useState<Record<string, any[]>>({}) // LocalStorage state
   const [tags, setTags] = useState<any[]>([])
   const [users, setUsers] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -199,15 +132,13 @@ export default function DashboardClient({ user }: DashboardClientProps) {
   })
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Load subtasks from localStorage on mount and when tasks change
-  useEffect(() => {
+    useEffect(() => {
     if (tasks.length > 0) {
       const subtasksMap: Record<string, any[]> = {}
       tasks.forEach(task => {
-        subtasksMap[task.id] = getSubtasksFromStorage(task.id)
+        subtasksMap[task.id] = (task.id)
       })
-      setTaskSubtasks(subtasksMap)
-    }
+          }
   }, [tasks])
 
   useEffect(() => { fetchData() }, [])
@@ -221,9 +152,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
         fetch('/api/tasks'), fetch('/api/tags'), fetch('/api/users')
       ])
       setTasks(await tasksRes.json())
-      const fetchedTags = await tagsRes.json()
-      
-      // Initialize predefined tags if database is empty
+      const fetchedTags = await tagsRes.json      // Initialize predefined tags if database is empty
       if (fetchedTags.length === 0) {
         const createdTags = []
         for (const tag of predefinedTags) {
@@ -257,22 +186,15 @@ export default function DashboardClient({ user }: DashboardClientProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...formData,
-          subtasks: undefined // Don't send subtasks to backend
-        })
+          subtasks: undefined         })
       })
-      if (!res.ok) throw new Error()
-      const newTask = await res.json()
-      
-      // Save subtasks to localStorage
-      if (formData.subtasks.length > 0) {
-        saveSubtasksToStorage(newTask.id, formData.subtasks)
-        setTaskSubtasks(prev => ({ ...prev, [newTask.id]: formData.subtasks }))
-      }
+      if (!res.ok) throw new Error      const newTask = await res.json            if (formData.subtasks.length > 0) {
+        
+              }
       
       setTasks([...tasks, newTask])
       toast.success('Task created!')
-      resetForm()
-    } catch {
+      resetForm    } catch {
       toast.error('Failed to create task')
     }
   }
@@ -285,20 +207,13 @@ export default function DashboardClient({ user }: DashboardClientProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...formData,
-          subtasks: undefined // Don't send subtasks to backend
-        })
+          subtasks: undefined         })
       })
-      if (!res.ok) throw new Error()
-      const updated = await res.json()
-      
-      // Save subtasks to localStorage
-      saveSubtasksToStorage(editingTask.id, formData.subtasks)
-      setTaskSubtasks(prev => ({ ...prev, [editingTask.id]: formData.subtasks }))
-      
+      if (!res.ok) throw new Error      const updated = await res.json            (editingTask.id, formData.subtasks)
+            
       setTasks(tasks.map(t => t.id === updated.id ? updated : t))
       toast.success('Task updated!')
-      resetForm()
-    } catch {
+      resetForm    } catch {
       toast.error('Failed to update task')
     }
   }
@@ -307,12 +222,8 @@ export default function DashboardClient({ user }: DashboardClientProps) {
     if (!confirm('Delete this task?')) return
     try {
       const res = await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error()
-      
-      // Delete subtasks from localStorage
-      deleteSubtasksFromStorage(taskId)
-      setTaskSubtasks(prev => {
-        const newMap = { ...prev }
+      if (!res.ok) throw new Error            
+              const newMap = { ...prev }
         delete newMap[taskId]
         return newMap
       })
@@ -341,16 +252,11 @@ export default function DashboardClient({ user }: DashboardClientProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(duplicateData)
       })
-      if (!res.ok) throw new Error()
-      const newTask = await res.json()
-      
-      // Duplicate subtasks to localStorage
-      const originalSubtasks = taskSubtasks[task.id] || []
+      if (!res.ok) throw new Error      const newTask = await res.json            const originalSubtasks = [] || []
       if (originalSubtasks.length > 0) {
         const duplicatedSubtasks = originalSubtasks.map(s => ({ ...s, id: Date.now() + Math.random() }))
-        saveSubtasksToStorage(newTask.id, duplicatedSubtasks)
-        setTaskSubtasks(prev => ({ ...prev, [newTask.id]: duplicatedSubtasks }))
-      }
+        (newTask.id, duplicatedSubtasks)
+              }
       
       setTasks([...tasks, newTask])
       toast.success('Task duplicated!')
@@ -362,9 +268,6 @@ export default function DashboardClient({ user }: DashboardClientProps) {
   const openEditModal = (task: any) => {
     setEditingTask(task)
     
-    // Load subtasks from localStorage
-    const localSubtasks = taskSubtasks[task.id] || []
-    
     setFormData({
       title: task.title,
       description: task.description || '',
@@ -373,7 +276,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
       dueDate: task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '',
       tagIds: task.tags?.map((t: any) => t.tagId) || [],
       assigneeIds: task.assignees?.map((a: any) => a.userId) || [],
-      subtasks: localSubtasks // Load from localStorage
+      finalReport: task.finalReport || ''
     })
     setShowTaskModal(true)
   }
@@ -383,27 +286,6 @@ export default function DashboardClient({ user }: DashboardClientProps) {
     setEditingTask(null)
     setShowTaskModal(false)
   }
-
-  const addSubtask = () => {
-    if (!newSubtask.trim()) return
-    setFormData({
-      ...formData,
-      subtasks: [...formData.subtasks, { id: Date.now().toString(), title: newSubtask, completed: false }]
-    })
-  }
-
-  const removeSubtask = (idx: number) => {
-    setFormData({ ...formData, subtasks: formData.subtasks.filter((_, i) => i !== idx) })
-  }
-
-  const handleToggleSubtask = useCallback((taskId: string, idx: number) => {
-    const currentSubtasks = taskSubtasks[taskId] || []
-    const updated = [...currentSubtasks]
-    updated[idx] = { ...updated[idx], completed: !updated[idx].completed }
-    
-    saveSubtasksToStorage(taskId, updated)
-    setTaskSubtasks(prev => ({ ...prev, [taskId]: updated }))
-  }, [taskSubtasks])
 
   // Rest of the code continues... (drag/drop, filters, etc.)
   const handleDragStart = useCallback((e: React.DragEvent, task: any) => {
@@ -418,13 +300,11 @@ export default function DashboardClient({ user }: DashboardClientProps) {
   }, [])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.dataTransfer.dropEffect = 'move'
+    e.preventDefault    e.dataTransfer.dropEffect = 'move'
   }, [])
 
   const handleDrop = useCallback(async (e: React.DragEvent, newStatus: string) => {
-    e.preventDefault()
-    if (!draggedTask || draggedTask.status === newStatus) {
+    e.preventDefault    if (!draggedTask || draggedTask.status === newStatus) {
       setDraggedTask(null)
       setIsDragging(false)
       return
@@ -443,8 +323,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...draggedTask, status: newStatus })
       })
-      if (!res.ok) throw new Error()
-      toast.success('Task moved!')
+      if (!res.ok) throw new Error      toast.success('Task moved!')
     } catch {
       setTasks(tasks)
       toast.error('Failed to move task')
@@ -461,8 +340,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
 
   const isOverdue = (dueDate: string | null) => {
     if (!dueDate) return false
-    return new Date(dueDate) < new Date()
-  }
+    return new Date(dueDate) < new Date  }
 
   // ... Continue with filters, export/import, and render
   // (Keep rest of the original code)
@@ -480,8 +358,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
     }
     if (sortBy === 'dueDate') return (a.dueDate || '9999') > (b.dueDate || '9999') ? 1 : -1
     if (sortBy === 'title') return a.title.localeCompare(b.title)
-    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  })
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime  })
 
   const todoTasks = sortedTasks.filter(t => t.status === 'todo')
   const inProgressTasks = sortedTasks.filter(t => t.status === 'in-progress')
@@ -499,46 +376,39 @@ export default function DashboardClient({ user }: DashboardClientProps) {
     const data = {
       tasks: tasks.map(t => ({
         ...t,
-        subtasks: taskSubtasks[t.id] || [] // Include localStorage subtasks in export
-      })),
+               })),
       tags,
       users,
-      exportedAt: new Date().toISOString()
-    }
+      exportedAt: new Date().toISOString    }
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
     a.download = `tasks-export-${new Date().toISOString().split('T')[0]}.json`
-    a.click()
-    toast.success('Data exported!')
+    a.click    toast.success('Data exported!')
   }
 
   const importData = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = async (event) => {
+    const reader = new FileReader    reader.onload = async (event) => {
       try {
         const imported = JSON.parse(event.target?.result as string)
         
-        // Import tasks (without subtasks to backend)
-        for (const task of imported.tasks) {
+                for (const task of imported.tasks) {
           const { subtasks, ...taskData } = task
           await fetch('/api/tasks', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(taskData)
           }).then(res => res.json()).then(newTask => {
-            // Save subtasks to localStorage
-            if (subtasks && subtasks.length > 0) {
-              saveSubtasksToStorage(newTask.id, subtasks)
+                        if (subtasks && subtasks.length > 0) {
+              (newTask.id, subtasks)
             }
           })
         }
         
-        await fetchData()
-        toast.success('Data imported!')
+        await fetchData        toast.success('Data imported!')
       } catch {
         toast.error('Import failed')
       }
@@ -645,7 +515,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
           
           <select value={filterAssignee} onChange={(e) => setFilterAssignee(e.target.value)} className="px-4 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
             <option value="all">All Users</option>
-            {users.map(u => <option key={u.id} value={u.id}>{u.name || u.email}</option>)}
+            {Array.isArray(users) && users.map(u => <option key={u.id} value={u.id}>{u.name || u.email}</option>)}
           </select>
           
           <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="px-4 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
@@ -686,8 +556,6 @@ export default function DashboardClient({ user }: DashboardClientProps) {
                     isOverdue={isOverdue}
                     users={users}
                     tags={tags}
-                    onToggleSubtask={handleToggleSubtask}
-                    localSubtasks={taskSubtasks[task.id]}
                   />
                 ))
               )}
@@ -720,8 +588,6 @@ export default function DashboardClient({ user }: DashboardClientProps) {
                     isOverdue={isOverdue}
                     users={users}
                     tags={tags}
-                    onToggleSubtask={handleToggleSubtask}
-                    localSubtasks={taskSubtasks[task.id]}
                   />
                 ))
               )}
@@ -754,8 +620,6 @@ export default function DashboardClient({ user }: DashboardClientProps) {
                     isOverdue={isOverdue}
                     users={users}
                     tags={tags}
-                    onToggleSubtask={handleToggleSubtask}
-                    localSubtasks={taskSubtasks[task.id]}
                   />
                 ))
               )}
@@ -863,7 +727,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Assign to</label>
                 <div className="space-y-2">
-                  {users.map(u => (
+                  {Array.isArray(users) && users.map(u => (
                     <label key={u.id} className="flex items-center gap-2">
                       <input
                         type="checkbox"
@@ -885,32 +749,24 @@ export default function DashboardClient({ user }: DashboardClientProps) {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Subtasks <span className="text-xs text-purple-600">(Saved locally - private to you)</span>
+                  📄 Laporan Akhir Pekerjaan
                 </label>
-                <div className="flex gap-2 mb-2">
-                  <input
-                    type="text"
-                    value={newSubtask}
-                    onChange={(e) => setNewSubtask(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && addSubtask()}
-                    className="flex-1 px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                    placeholder="Add subtask"
-                  />
-                  <button onClick={addSubtask} className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
-                    Add
-                  </button>
-                </div>
-                <div className="space-y-2">
-                  {formData.subtasks.map((sub, idx) => (
-                    <div key={sub.id} className="flex items-center gap-2 p-2 bg-gray-50 dark:bg-gray-700 rounded">
-                      <GripVertical className="h-4 w-4 text-gray-400" />
-                      <span className="flex-1 text-sm text-gray-900 dark:text-white">{sub.title}</span>
-                      <button onClick={() => removeSubtask(idx)} className="text-red-500 hover:text-red-700 h-4 w-4">
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
+                <textarea
+                  value={formData.finalReport}
+                  onChange={(e) => setFormData({ ...formData, finalReport: e.target.value })}
+                  className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  rows={5}
+                  placeholder="Tuliskan laporan hasil akhir pekerjaan di sini...
+
+Contoh:
+- Hasil yang dicapai
+- Kendala yang dihadapi
+- Solusi yang diterapkan
+- Kesimpulan"
+                />
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Laporan ini akan terlihat oleh semua anggota tim yang dapat mengakses task ini.
+                </p>
               </div>
 
               <div className="flex gap-3 mt-6">
@@ -940,12 +796,6 @@ export default function DashboardClient({ user }: DashboardClientProps) {
               <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
                 <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Logged in as:</div>
                 <div className="font-medium text-gray-900 dark:text-white">{user.name || user.email}</div>
-              </div>
-              <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
-                <div className="text-sm font-medium text-purple-900 dark:text-purple-200 mb-1">💡 Subtasks Info</div>
-                <div className="text-xs text-purple-700 dark:text-purple-300">
-                  Subtasks are saved locally in your browser only. They are private to you and will not be visible to other users.
-                </div>
               </div>
               <button onClick={() => signOut()} className="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
                 Sign Out
