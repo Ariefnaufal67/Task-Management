@@ -134,10 +134,8 @@ export default function DashboardClient({ user }: DashboardClientProps) {
 
     useEffect(() => {
     if (tasks.length > 0) {
-      const subtasksMap: Record<string, any[]> = {}
-      tasks.forEach(task => {
-        subtasksMap[task.id] = (task.id)
-      })
+            tasks.forEach(task => {
+              })
           }
   }, [tasks])
 
@@ -169,7 +167,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
       } else {
         setTags(fetchedTags)
       }
-      
+
       setUsers(await usersRes.json())
     } catch (error) {
       toast.error('Failed to load data')
@@ -184,17 +182,15 @@ export default function DashboardClient({ user }: DashboardClientProps) {
       const res = await fetch('/api/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...formData,
-          subtasks: undefined         })
+        body: JSON.stringify(formData)
       })
-      if (!res.ok) throw new Error      const newTask = await res.json            if (formData.subtasks.length > 0) {
-        
-              }
-      
+      if (!res.ok) throw new Error()
+      const newTask = await res.json()
+
       setTasks([...tasks, newTask])
       toast.success('Task created!')
-      resetForm    } catch {
+      resetForm()
+    } catch {
       toast.error('Failed to create task')
     }
   }
@@ -205,15 +201,15 @@ export default function DashboardClient({ user }: DashboardClientProps) {
       const res = await fetch(`/api/tasks/${editingTask.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...formData,
-          subtasks: undefined         })
+        body: JSON.stringify(formData)
       })
-      if (!res.ok) throw new Error      const updated = await res.json            (editingTask.id, formData.subtasks)
-            
+      if (!res.ok) throw new Error()
+      const updated = await res.json()
+
       setTasks(tasks.map(t => t.id === updated.id ? updated : t))
       toast.success('Task updated!')
-      resetForm    } catch {
+      resetForm()
+    } catch {
       toast.error('Failed to update task')
     }
   }
@@ -222,12 +218,12 @@ export default function DashboardClient({ user }: DashboardClientProps) {
     if (!confirm('Delete this task?')) return
     try {
       const res = await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error            
+      if (!res.ok) throw new Error
               const newMap = { ...prev }
         delete newMap[taskId]
         return newMap
       })
-      
+
       setTasks(tasks.filter(t => t.id !== taskId))
       toast.success('Task deleted!')
     } catch {
@@ -246,18 +242,16 @@ export default function DashboardClient({ user }: DashboardClientProps) {
         tagIds: task.tags?.map((t: any) => t.tagId) || [],
         assigneeIds: task.assignees?.map((a: any) => a.userId) || []
       }
-      
+
       const res = await fetch('/api/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(duplicateData)
       })
-      if (!res.ok) throw new Error      const newTask = await res.json            const originalSubtasks = [] || []
-      if (originalSubtasks.length > 0) {
-        const duplicatedSubtasks = originalSubtasks.map(s => ({ ...s, id: Date.now() + Math.random() }))
-        (newTask.id, duplicatedSubtasks)
+      if (!res.ok) throw new Error      const newTask = await res.json                  ))
+
               }
-      
+
       setTasks([...tasks, newTask])
       toast.success('Task duplicated!')
     } catch {
@@ -267,7 +261,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
 
   const openEditModal = (task: any) => {
     setEditingTask(task)
-    
+
     setFormData({
       title: task.title,
       description: task.description || '',
@@ -344,7 +338,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
 
   // ... Continue with filters, export/import, and render
   // (Keep rest of the original code)
-  
+
   const filteredTasks = tasks
     .filter(t => !searchTerm || t.title.toLowerCase().includes(searchTerm.toLowerCase()) || t.description?.toLowerCase().includes(searchTerm.toLowerCase()))
     .filter(t => filterPriority === 'all' || t.priority === filterPriority)
@@ -394,20 +388,18 @@ export default function DashboardClient({ user }: DashboardClientProps) {
     const reader = new FileReader    reader.onload = async (event) => {
       try {
         const imported = JSON.parse(event.target?.result as string)
-        
+
                 for (const task of imported.tasks) {
-          const { subtasks, ...taskData } = task
+          const taskData = task
           await fetch('/api/tasks', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(taskData)
           }).then(res => res.json()).then(newTask => {
-                        if (subtasks && subtasks.length > 0) {
-              (newTask.id, subtasks)
-            }
+
           })
         }
-        
+
         await fetchData        toast.success('Data imported!')
       } catch {
         toast.error('Import failed')
@@ -428,7 +420,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
               <CheckCircle2 className="h-8 w-8 text-purple-600" />
               <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Task Management Pro</h1>
             </div>
-            
+
             <div className="flex items-center gap-2">
               <button onClick={exportData} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Export">
                 <Download className="h-5 w-5 text-gray-600 dark:text-gray-300" />
@@ -437,7 +429,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
                 <Upload className="h-5 w-5 text-gray-600 dark:text-gray-300" />
               </button>
               <input ref={fileInputRef} type="file" accept=".json" onChange={importData} className="hidden" />
-              
+
               <button onClick={() => setShowUserModal(true)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Settings">
                 <Settings className="h-5 w-5 text-gray-600 dark:text-gray-300" />
               </button>
@@ -489,7 +481,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
             <Plus className="h-5 w-5" />
             New Task
           </button>
-          
+
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
             <input
@@ -500,24 +492,24 @@ export default function DashboardClient({ user }: DashboardClientProps) {
               className="w-full pl-10 pr-4 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
             />
           </div>
-          
+
           <select value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)} className="px-4 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
             <option value="all">All Priorities</option>
             <option value="high">High</option>
             <option value="medium">Medium</option>
             <option value="low">Low</option>
           </select>
-          
+
           <select value={filterTag} onChange={(e) => setFilterTag(e.target.value)} className="px-4 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
             <option value="all">All Tags</option>
             {tags.map(tag => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
           </select>
-          
+
           <select value={filterAssignee} onChange={(e) => setFilterAssignee(e.target.value)} className="px-4 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
             <option value="all">All Users</option>
             {Array.isArray(users) && users.map(u => <option key={u.id} value={u.id}>{u.name || u.email}</option>)}
           </select>
-          
+
           <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="px-4 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
             <option value="createdAt">Newest</option>
             <option value="priority">Priority</option>
@@ -675,7 +667,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
                     <option value="low">Low</option>
                   </select>
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Status</label>
                   <select
